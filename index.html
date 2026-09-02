@@ -109,20 +109,20 @@
   .ap-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; box-shadow: 0 0 6px 1px currentColor; }
   .ap-icon { width: 17px; height: 17px; flex-shrink: 0; color: var(--text-dim); }
 
-  #bodyStyleRow {
+  #bodyStyleRow, #bodyTypeRow {
     display: flex; align-items: center; gap: 8px; margin: var(--size-xxs) var(--size-xs) 0;
     padding: 10px var(--size-xxs); border: 1px solid var(--border-soft); border-radius: var(--radius-md);
     background: var(--panel-2);
   }
-  #bodyStyleRow[hidden] { display: none; }
-  #bodyStyleRow span.lbl { font-size: 12px; color: var(--text-dim); }
-  #bodyStyleRow .style-btns { display: flex; gap: 6px; margin-left: auto; }
-  #bodyStyleRow .style-btns button {
+  #bodyStyleRow[hidden], #bodyTypeRow[hidden] { display: none; }
+  #bodyStyleRow span.lbl, #bodyTypeRow span.lbl { font-size: 12px; color: var(--text-dim); }
+  #bodyStyleRow .style-btns, #bodyTypeRow .style-btns { display: flex; gap: 6px; margin-left: auto; }
+  #bodyStyleRow .style-btns button, #bodyTypeRow .style-btns button {
     flex: 1 0 64px; font-size: 12px; font-weight: 500; padding: 6px 10px; border-radius: var(--radius-sm);
     border: 1px solid var(--border); background: var(--panel-3); color: var(--text-dim); cursor: pointer;
     font-family: var(--font-body); text-align: center;
   }
-  #bodyStyleRow .style-btns button.active { background: var(--accent-selected); border-color: var(--accent); color: var(--text); }
+  #bodyStyleRow .style-btns button.active, #bodyTypeRow .style-btns button.active { background: var(--accent-selected); border-color: var(--accent); color: var(--text); }
 
   #apTooltip {
     position: absolute; pointer-events: none; z-index: 10; transform: translate(-50%, -130%);
@@ -181,6 +181,13 @@
       <div class="style-btns">
         <button id="styleClassic" class="active">Classic</button>
         <button id="styleGlow">Glow</button>
+      </div>
+    </div>
+    <div id="bodyTypeRow" hidden>
+      <span class="lbl">Body type</span>
+      <div class="style-btns">
+        <button id="typeStandard" class="active">Standard</button>
+        <button id="typeObese">Obese</button>
       </div>
     </div>
     <div id="accessPointsBox" hidden>
@@ -253,6 +260,9 @@ const robotDot = document.getElementById('robotDot');
 const bodyStyleRow = document.getElementById('bodyStyleRow');
 const styleClassicBtn = document.getElementById('styleClassic');
 const styleGlowBtn = document.getElementById('styleGlow');
+const bodyTypeRow = document.getElementById('bodyTypeRow');
+const typeStandardBtn = document.getElementById('typeStandard');
+const typeObeseBtn = document.getElementById('typeObese');
 const apTooltip = document.getElementById('apTooltip');
 
 const GROUP_META = [
@@ -697,6 +707,15 @@ let ecorcheModel = null, ecorcheLoadPromise = null;
 let ecorcheCamPos = null, ecorcheTarget = null;
 let ecorcheAccessPoints = null;
 let activePresetKey = null;
+// Obese body-type variant: a procedurally-deformed clone of the same
+// écorché mesh (belly pushed outward around waist height), built lazily the
+// first time it's selected. Its own access-point set is rebuilt against the
+// deformed surface via the same raycast placement as the standard body, so
+// points land correctly on the larger silhouette without hand-tuning.
+let ecorcheObeseModel = null, ecorcheObeseAccessPoints = null;
+let bodyType = 'standard';
+let activeEcorcheGroup = null;
+let activeAccessPoints = null;
 
 // Access-point overlay (laparoscopic entry sites + catheterization/pulse
 // sites), shown only on the Whole Body écorché view. Positions are standard
@@ -734,20 +753,15 @@ const ACCESS_POINTS = [
   { label: 'Dorsalis Pedis', group: 'vasc', h: 0.02, x: -0.10, dir: 'top' },
   { label: 'Posterior Tibial', group: 'vasc', h: 0.045, x: 0.08, dir: 'back' },
   { label: 'Posterior Tibial', group: 'vasc', h: 0.045, x: -0.08, dir: 'back' },
-  // Robotic surgery port template — matched to a real marked-up upper
-  // abdomen photo: Camera/LH/RH sit in one row (LH-Camera and Camera-RH
-  // each ~9cm apart per the photo's own annotation, so LH/RH are placed
-  // symmetric-ish about the camera), Reserve continues that row further
-  // out past RH, Nathanson (subxiphoid liver retractor) sits above the row
-  // near the midline, and Assistant sits below the row, anchored relative
-  // to the umbilicus (h 0.60 in this scale) the same way as the
-  // laparoscopic group above.
+  // Robotic surgery port template — placed directly against a screenshot of
+  // this model with the real 5 port positions marked: RH/Camera/LH form one
+  // row across the upper abdomen, with two Assistant ports below, closer
+  // together and slightly lower.
   { label: 'Camera (Endoscope)', group: 'robot', h: 0.675, x: 0, dir: 'front' },
-  { label: "LH (Surgeon's Left Hand)", group: 'robot', h: 0.675, x: -0.22, dir: 'front' },
-  { label: "RH (Surgeon's Right Hand)", group: 'robot', h: 0.675, x: 0.20, dir: 'front' },
-  { label: 'Reserve', group: 'robot', h: 0.675, x: 0.40, dir: 'front' },
-  { label: 'Nathanson (Liver Retractor)', group: 'robot', h: 0.73, x: 0.05, dir: 'front' },
-  { label: 'Assistant', group: 'robot', h: 0.645, x: 0.14, dir: 'front' },
+  { label: "RH (Surgeon's Right Hand)", group: 'robot', h: 0.675, x: -0.20, dir: 'front' },
+  { label: "LH (Surgeon's Left Hand)", group: 'robot', h: 0.675, x: 0.20, dir: 'front' },
+  { label: 'Assistant', group: 'robot', h: 0.64, x: -0.12, dir: 'front' },
+  { label: 'Assistant', group: 'robot', h: 0.64, x: 0.12, dir: 'front' },
 ];
 
 const LAP_COLOR = 0x3d8ee0;   // brighter azure — laparoscopic entry points
@@ -874,7 +888,7 @@ const BODY_STYLES = {
   glow: { tint: 0x35506e, opacity: 0.22, roughnessAdd: 0.25, metalnessSub: 0.1, emissive: 0x0a1622, emissiveIntensity: 0.3, depthWrite: false, bloom: true, rim: true },
 };
 let ecorcheBodyStyle = 'classic';
-let ecorcheRimShells = null;
+const rimShellsByGroup = new WeakMap();
 
 // A thin, slightly-inflated, backside-only, additive-blended copy of each
 // mesh, added as a sibling of the original (so it inherits the same parent
@@ -902,9 +916,10 @@ function buildRimShell(model) {
 
 function applyBodyStyle(styleName) {
   const style = BODY_STYLES[styleName];
-  if (!ecorcheModel || !style) return;
+  const group = activeEcorcheGroup;
+  if (!group || !style) return;
   const tint = new THREE.Color(style.tint);
-  ecorcheModel.traverse(o => {
+  group.traverse(o => {
     if (!o.isMesh) return;
     const mats = Array.isArray(o.material) ? o.material : [o.material];
     mats.forEach(m => {
@@ -924,16 +939,151 @@ function applyBodyStyle(styleName) {
       m.needsUpdate = true;
     });
   });
+  let shells = rimShellsByGroup.get(group);
   if (style.rim) {
-    if (!ecorcheRimShells) ecorcheRimShells = buildRimShell(ecorcheModel);
-    ecorcheRimShells.forEach(s => s.visible = true);
-  } else if (ecorcheRimShells) {
-    ecorcheRimShells.forEach(s => s.visible = false);
+    if (!shells) { shells = buildRimShell(group); rimShellsByGroup.set(group, shells); }
+    shells.forEach(s => s.visible = true);
+  } else if (shells) {
+    shells.forEach(s => s.visible = false);
   }
   ecorcheBodyStyle = styleName;
   useBloom = !!style.bloom;
   requestRender();
 }
+
+// --- "Obese" body type: a procedurally-deformed clone of the standard ----
+// écorché mesh. There's no separate sculpted asset for this, so each mesh's
+// geometry is cloned, its world-space transform baked in directly (so the
+// clone can live in its own flat group with no parenting to work out), and
+// then two deformations are layered: a broad RADIAL SCALE centered around
+// the hips (covering roughly chest to mid-thigh) that thickens whatever is
+// already offset from the central axis at that height — torso, but also
+// arms and legs, since they too sit away from center — and a second,
+// tighter absolute push at waist height for a defined belly on top of that.
+// An earlier version only did the belly push in isolation, which left the
+// limbs looking untouched/thin next to a suddenly bloated torso.
+function buildObeseVariant(baseModel) {
+  const group = new THREE.Group();
+  const worldBox = new THREE.Box3().setFromObject(baseModel);
+  const worldSize = worldBox.getSize(new THREE.Vector3());
+  const worldCenter = worldBox.getCenter(new THREE.Vector3());
+
+  const bodyCenterY = worldBox.min.y + worldSize.y * 0.50;
+  const bodyFalloff = worldSize.y * 0.35;
+  const bodyMaxScale = 0.35; // up to +35% radial thickness at peak (torso, arms, legs alike)
+
+  const bellyY = worldBox.min.y + worldSize.y * 0.58;
+  const bellyFalloff = worldSize.y * 0.09;
+  const bellyPush = worldSize.y * 0.09;
+
+  const v = new THREE.Vector3();
+
+  baseModel.traverse(o => {
+    if (!o.isMesh) return;
+    o.updateMatrixWorld(true);
+    const geo = o.geometry.clone();
+    const mirrored = o.matrixWorld.determinant() < 0;
+    geo.applyMatrix4(o.matrixWorld);
+    if (mirrored) {
+      // A negative-determinant world transform (a mirrored rig part) flips
+      // winding order; three.js normally compensates for that at render
+      // time based on the object's own matrix, but that compensation goes
+      // away once the transform is baked into the geometry and the mesh
+      // gets an identity transform instead. Left uncorrected, the freshly
+      // computed vertex normals end up pointing inward and the mesh renders
+      // as an unlit black silhouette. Reversing each triangle's winding
+      // here restores correct outward-facing normals.
+      const index = geo.getIndex();
+      if (index) {
+        const arr = index.array;
+        for (let i = 0; i < arr.length; i += 3) { const t = arr[i]; arr[i] = arr[i + 2]; arr[i + 2] = t; }
+        index.needsUpdate = true;
+      }
+    }
+    const pos = geo.attributes.position;
+    for (let i = 0; i < pos.count; i++) {
+      v.fromBufferAttribute(pos, i);
+      const dxBody = v.x - worldCenter.x, dzBody = v.z - worldCenter.z;
+      const dyBody = v.y - bodyCenterY;
+      const bodyWeight = Math.exp(-(dyBody * dyBody) / (2 * bodyFalloff * bodyFalloff));
+      const scale = 1 + bodyMaxScale * bodyWeight;
+      let nx = worldCenter.x + dxBody * scale;
+      let nz = worldCenter.z + dzBody * scale;
+
+      const dyBelly = v.y - bellyY;
+      const bellyWeight = Math.exp(-(dyBelly * dyBelly) / (2 * bellyFalloff * bellyFalloff));
+      if (bellyWeight > 0.002) {
+        const ndx = nx - worldCenter.x, ndz = nz - worldCenter.z;
+        const radial = Math.sqrt(ndx * ndx + ndz * ndz) || 0.0001;
+        const push = bellyPush * bellyWeight;
+        nx += (ndx / radial) * push;
+        nz += (ndz / radial) * push;
+      }
+      pos.setXYZ(i, nx, v.y, nz);
+    }
+    pos.needsUpdate = true;
+    geo.computeVertexNormals();
+    const srcMats = Array.isArray(o.material) ? o.material : [o.material];
+    const mats = srcMats.map(m => {
+      const clone = m.clone();
+      // Material.clone()/copy() round-trips userData through
+      // JSON.parse(JSON.stringify(...)), and THREE.Color defines toJSON()
+      // as getHex() — so the Color instance stashed in userData.baseColor
+      // silently turns into a plain hex integer on the clone. Left as-is,
+      // applyBodyStyle's `m.color.copy(m.userData.baseColor)` reads
+      // .r/.g/.b off a number (all undefined), producing an NaN color and
+      // an unlit black mesh. Restore the real Color instance directly from
+      // the untouched source material instead of trusting the clone.
+      if (m.userData.baseColor) {
+        clone.userData.baseColor = m.userData.baseColor.clone();
+        clone.userData.baseRoughness = m.userData.baseRoughness;
+        clone.userData.baseMetalness = m.userData.baseMetalness;
+      }
+      return clone;
+    });
+    group.add(new THREE.Mesh(geo, mats.length > 1 ? mats : mats[0]));
+  });
+  group.visible = false;
+  return group;
+}
+
+function ensureObeseVariant() {
+  if (ecorcheObeseModel) return ecorcheObeseModel;
+  ecorcheObeseModel = buildObeseVariant(ecorcheModel);
+  scene.add(ecorcheObeseModel);
+  const box2 = new THREE.Box3().setFromObject(ecorcheObeseModel);
+  const size2b = box2.getSize(new THREE.Vector3());
+  const center2b = box2.getCenter(new THREE.Vector3());
+  ecorcheObeseAccessPoints = buildAccessPointMarkers(ecorcheObeseModel, box2, size2b, center2b);
+  scene.add(ecorcheObeseAccessPoints.lap, ecorcheObeseAccessPoints.vasc, ecorcheObeseAccessPoints.robot);
+  return ecorcheObeseModel;
+}
+
+// Shared by the Standard/Obese buttons and by applyPreset('whole') (so
+// re-entering Whole Body restores whichever body type was last picked).
+function applyBodyType(type) {
+  bodyType = type;
+  const showObese = type === 'obese';
+  if (showObese) ensureObeseVariant();
+  if (ecorcheModel) ecorcheModel.visible = !showObese;
+  if (ecorcheObeseModel) ecorcheObeseModel.visible = showObese;
+  activeEcorcheGroup = showObese ? ecorcheObeseModel : ecorcheModel;
+  applyBodyStyle(ecorcheBodyStyle);
+
+  if (ecorcheAccessPoints) { ecorcheAccessPoints.lap.visible = false; ecorcheAccessPoints.vasc.visible = false; ecorcheAccessPoints.robot.visible = false; }
+  if (ecorcheObeseAccessPoints) { ecorcheObeseAccessPoints.lap.visible = false; ecorcheObeseAccessPoints.vasc.visible = false; ecorcheObeseAccessPoints.robot.visible = false; }
+  activeAccessPoints = showObese ? ecorcheObeseAccessPoints : ecorcheAccessPoints;
+  if (activeAccessPoints) {
+    activeAccessPoints.lap.visible = lapToggle.checked;
+    activeAccessPoints.vasc.visible = vascToggle.checked;
+    activeAccessPoints.robot.visible = robotToggle.checked;
+  }
+  typeStandardBtn.classList.toggle('active', !showObese);
+  typeObeseBtn.classList.toggle('active', showObese);
+  requestRender();
+}
+typeStandardBtn.addEventListener('click', () => applyBodyType('standard'));
+typeObeseBtn.addEventListener('click', () => applyBodyType('obese'));
 
 async function ensureEcorcheLoaded() {
   if (ecorcheModel) return ecorcheModel;
@@ -956,6 +1106,7 @@ async function ensureEcorcheLoaded() {
     obj.visible = false;
     scene.add(obj);
     ecorcheModel = obj;
+    activeEcorcheGroup = obj;
     applyBodyStyle(ecorcheBodyStyle);
 
     const box2 = new THREE.Box3().setFromObject(obj);
@@ -972,6 +1123,7 @@ async function ensureEcorcheLoaded() {
     ecorcheCamPos = new THREE.Vector3(center2b.x, center2b.y + 0.15, center2b.z + dist);
 
     ecorcheAccessPoints = buildAccessPointMarkers(obj, box2, size2b, center2b);
+    activeAccessPoints = ecorcheAccessPoints;
     scene.add(ecorcheAccessPoints.lap, ecorcheAccessPoints.vasc, ecorcheAccessPoints.robot);
 
     statusEl.style.display = 'none';
@@ -996,19 +1148,14 @@ async function applyPreset(key, cardEl) {
     });
     accessPointsBox.hidden = false;
     bodyStyleRow.hidden = false;
-    const model = await ensureEcorcheLoaded();
+    bodyTypeRow.hidden = false;
+    await ensureEcorcheLoaded();
     // The 30MB model can take a few seconds; if the user already switched to
     // a different preset while it was loading, don't clobber their choice —
     // without this guard the écorché model (now opaque in Classic) would pop
     // back in on top of whatever the user picked, visually burying it.
     if (activePresetKey !== 'whole') return;
-    model.visible = true;
-    useBloom = ecorcheBodyStyle === 'glow';
-    if (ecorcheAccessPoints) {
-      ecorcheAccessPoints.lap.visible = lapToggle.checked;
-      ecorcheAccessPoints.vasc.visible = vascToggle.checked;
-      ecorcheAccessPoints.robot.visible = robotToggle.checked;
-    }
+    applyBodyType(bodyType); // restores whichever body type (Standard/Obese) was last picked
     topbarH1.textContent = 'Male Full-Body';
     camera.position.copy(ecorcheCamPos);
     controls.target.copy(ecorcheTarget);
@@ -1018,14 +1165,17 @@ async function applyPreset(key, cardEl) {
 
   accessPointsBox.hidden = true;
   bodyStyleRow.hidden = true;
+  bodyTypeRow.hidden = true;
   lapToggle.checked = false;
   vascToggle.checked = false;
   robotToggle.checked = false;
   useBloom = false;
   if (ecorcheAccessPoints) { ecorcheAccessPoints.lap.visible = false; ecorcheAccessPoints.vasc.visible = false; ecorcheAccessPoints.robot.visible = false; }
+  if (ecorcheObeseAccessPoints) { ecorcheObeseAccessPoints.lap.visible = false; ecorcheObeseAccessPoints.vasc.visible = false; ecorcheObeseAccessPoints.robot.visible = false; }
   apTooltip.style.display = 'none';
   topbarH1.textContent = 'Abdominothoracic Region';
   if (ecorcheModel) ecorcheModel.visible = false;
+  if (ecorcheObeseModel) ecorcheObeseModel.visible = false;
   const preset = PRESETS.find(p => p.key === key);
   applyGroupFilter(preset.groups);
   requestRender();
@@ -1052,14 +1202,17 @@ document.getElementById('showAll').addEventListener('click', () => {
   activePresetKey = null;
   accessPointsBox.hidden = true;
   bodyStyleRow.hidden = true;
+  bodyTypeRow.hidden = true;
   lapToggle.checked = false;
   vascToggle.checked = false;
   robotToggle.checked = false;
   useBloom = false;
   if (ecorcheAccessPoints) { ecorcheAccessPoints.lap.visible = false; ecorcheAccessPoints.vasc.visible = false; ecorcheAccessPoints.robot.visible = false; }
+  if (ecorcheObeseAccessPoints) { ecorcheObeseAccessPoints.lap.visible = false; ecorcheObeseAccessPoints.vasc.visible = false; ecorcheObeseAccessPoints.robot.visible = false; }
   apTooltip.style.display = 'none';
   topbarH1.textContent = 'Abdominothoracic Region';
   if (ecorcheModel) ecorcheModel.visible = false;
+  if (ecorcheObeseModel) ecorcheObeseModel.visible = false;
   Object.values(partsByFile).forEach(p => p.visible = true);
   document.querySelectorAll('#groups input[type="checkbox"]').forEach(cb => cb.checked = true);
   document.querySelectorAll('.preset-card').forEach(c => c.classList.remove('active'));
@@ -1072,15 +1225,15 @@ vascDot.style.background = vascDot.style.color;
 robotDot.style.color = '#' + ROBOT_COLOR.toString(16).padStart(6, '0');
 robotDot.style.background = robotDot.style.color;
 lapToggle.addEventListener('change', () => {
-  if (ecorcheAccessPoints) ecorcheAccessPoints.lap.visible = lapToggle.checked;
+  if (activeAccessPoints) activeAccessPoints.lap.visible = lapToggle.checked;
   requestRender();
 });
 vascToggle.addEventListener('change', () => {
-  if (ecorcheAccessPoints) ecorcheAccessPoints.vasc.visible = vascToggle.checked;
+  if (activeAccessPoints) activeAccessPoints.vasc.visible = vascToggle.checked;
   requestRender();
 });
 robotToggle.addEventListener('change', () => {
-  if (ecorcheAccessPoints) ecorcheAccessPoints.robot.visible = robotToggle.checked;
+  if (activeAccessPoints) activeAccessPoints.robot.visible = robotToggle.checked;
   requestRender();
 });
 styleClassicBtn.addEventListener('click', () => {
@@ -1098,8 +1251,8 @@ styleGlowBtn.addEventListener('click', () => {
 const apRaycaster = new THREE.Raycaster();
 const apMouseNdc = new THREE.Vector2();
 renderer.domElement.addEventListener('pointermove', (ev) => {
-  if (!ecorcheAccessPoints || activePresetKey !== 'whole') return;
-  const visibleHitboxes = ecorcheAccessPoints.hitboxes.filter(h => ecorcheAccessPoints[h.group]?.visible);
+  if (!activeAccessPoints || activePresetKey !== 'whole') return;
+  const visibleHitboxes = activeAccessPoints.hitboxes.filter(h => activeAccessPoints[h.group]?.visible);
   if (!visibleHitboxes.length) { apTooltip.style.display = 'none'; return; }
   const rect = renderer.domElement.getBoundingClientRect();
   apMouseNdc.x = ((ev.clientX - rect.left) / rect.width) * 2 - 1;
@@ -1125,13 +1278,16 @@ document.getElementById('resetView').addEventListener('click', () => {
   document.querySelectorAll('.preset-card').forEach(c => c.classList.remove('active'));
   accessPointsBox.hidden = true;
   bodyStyleRow.hidden = true;
+  bodyTypeRow.hidden = true;
   lapToggle.checked = false;
   vascToggle.checked = false;
   robotToggle.checked = false;
   useBloom = false;
   if (ecorcheAccessPoints) { ecorcheAccessPoints.lap.visible = false; ecorcheAccessPoints.vasc.visible = false; ecorcheAccessPoints.robot.visible = false; }
+  if (ecorcheObeseAccessPoints) { ecorcheObeseAccessPoints.lap.visible = false; ecorcheObeseAccessPoints.vasc.visible = false; ecorcheObeseAccessPoints.robot.visible = false; }
   apTooltip.style.display = 'none';
   if (ecorcheModel) ecorcheModel.visible = false;
+  if (ecorcheObeseModel) ecorcheObeseModel.visible = false;
   topbarH1.textContent = 'Abdominothoracic Region';
   applyGroupFilter(['heart', 'vasculature', 'organs']);
   camera.position.copy(defaultCamPos);
