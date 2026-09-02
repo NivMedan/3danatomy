@@ -573,12 +573,10 @@ Promise.all(CLASSIFICATION.map(item =>
   statusEl.style.display = 'none';
   requestRender();
 
-  // Background-prefetch the 30MB Whole Body GLB once the main scene is idle,
-  // so the first click on "Whole Body" later doesn't pay the full download +
-  // parse cost right when the user is waiting on it.
-  const prefetchEcorche = () => ensureEcorcheLoaded().catch(() => {});
-  if ('requestIdleCallback' in window) requestIdleCallback(prefetchEcorche, { timeout: 4000 });
-  else setTimeout(prefetchEcorche, 1500);
+  // Default landing view: Whole Body (Classic style), zoomed out to frame
+  // the full standing figure.
+  const wholeCard = presetsEl.querySelector('[data-key="whole"]');
+  applyPreset('whole', wholeCard);
 });
 
 function setGroupVisible(key, visible) {
@@ -670,6 +668,7 @@ function buildPresets() {
   PRESETS.forEach(preset => {
     const card = document.createElement('div');
     card.className = 'preset-card' + (preset.wide ? ' wide' : '');
+    card.dataset.key = preset.key;
     card.innerHTML = `<span class="preset-icon">${PRESET_ICONS[preset.key]}</span><span class="label">${preset.label}</span>`;
     card.addEventListener('click', () => applyPreset(preset.key, card));
     presetsEl.appendChild(card);
@@ -832,14 +831,15 @@ function buildAccessPointMarkers(model, box2, size2b, center2b) {
 // material's pristine loaded color/roughness/metalness (stashed in
 // userData the first time) so switching back and forth never compounds.
 const BODY_STYLES = {
-  // Original look: cool, ghostly, heavily see-through.
-  classic: { tint: 0xffb8a8, opacity: 0.15, roughnessAdd: 0.2, metalnessSub: 0.1, emissive: 0x000000, emissiveIntensity: 0, depthWrite: false, bloom: false, rim: false },
+  // Solid, warm, high-end manikin look — a solid opaque body rather than a
+  // see-through ghost.
+  classic: { tint: 0xfff0da, opacity: 0.62, roughnessAdd: 0.3, metalnessSub: 0.15, emissive: 0x3a2a12, emissiveIntensity: 0.4, depthWrite: true, bloom: false, rim: false },
   // "X-ray hologram" look: a dark, desaturated blue-black body (mostly
-  // see-through, like classic) with a soft cyan rim light hugging the
-  // silhouette — not a flat bright wash over the whole surface. The rim is
-  // a separate slightly-inflated backside shell (see buildRimShell) rather
-  // than a real Fresnel shader, so it's cheap and version-safe; combined
-  // with a gentle bloom pass it reads as a soft glow along the edges.
+  // see-through) with a soft cyan rim light hugging the silhouette — not a
+  // flat bright wash over the whole surface. The rim is a separate
+  // slightly-inflated backside shell (see buildRimShell) rather than a real
+  // Fresnel shader, so it's cheap and version-safe; combined with a gentle
+  // bloom pass it reads as a soft glow along the edges.
   glow: { tint: 0x35506e, opacity: 0.22, roughnessAdd: 0.25, metalnessSub: 0.1, emissive: 0x0a1622, emissiveIntensity: 0.3, depthWrite: false, bloom: true, rim: true },
 };
 let ecorcheBodyStyle = 'classic';
@@ -930,7 +930,13 @@ async function ensureEcorcheLoaded() {
     const box2 = new THREE.Box3().setFromObject(obj);
     const size2b = box2.getSize(new THREE.Vector3());
     const center2b = box2.getCenter(new THREE.Vector3());
-    const dist = size2b.length() * 0.8;
+    // Distance needed so the full standing height fits inside the vertical
+    // FOV (with margin), not just whatever the bounding-box diagonal gives —
+    // a diagonal-based distance was cropping the head/feet for a tall, thin
+    // standing figure.
+    const fovRad = THREE.MathUtils.degToRad(camera.fov);
+    const heightFitDist = (size2b.y / 2) / Math.tan(fovRad / 2) * 1.35;
+    const dist = Math.max(size2b.length() * 0.8, heightFitDist);
     ecorcheTarget = center2b.clone();
     ecorcheCamPos = new THREE.Vector3(center2b.x, center2b.y + 0.15, center2b.z + dist);
 
