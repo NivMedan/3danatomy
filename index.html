@@ -202,6 +202,16 @@
         <span class="ap-dot" id="vascDot"></span>
         <span>Vascular access points</span>
       </label>
+      <label class="ap-row">
+        <input type="checkbox" id="robotToggle" />
+        <svg class="ap-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="4.5" cy="19" r="1.7"/><line x1="5.8" y1="17.8" x2="11" y2="12.3"/>
+          <circle cx="11" cy="12.3" r="1.5"/><line x1="12.2" y1="11.1" x2="16.5" y2="6.2"/>
+          <circle cx="17.5" cy="5" r="1.7"/>
+        </svg>
+        <span class="ap-dot" id="robotDot"></span>
+        <span>Robotic Surgery Access</span>
+      </label>
     </div>
     <div id="groups"></div>
   </div>
@@ -236,8 +246,10 @@ const hintEl = document.getElementById('hint');
 const accessPointsBox = document.getElementById('accessPointsBox');
 const lapToggle = document.getElementById('lapToggle');
 const vascToggle = document.getElementById('vascToggle');
+const robotToggle = document.getElementById('robotToggle');
 const lapDot = document.getElementById('lapDot');
 const vascDot = document.getElementById('vascDot');
+const robotDot = document.getElementById('robotDot');
 const bodyStyleRow = document.getElementById('bodyStyleRow');
 const styleClassicBtn = document.getElementById('styleClassic');
 const styleGlowBtn = document.getElementById('styleGlow');
@@ -722,10 +734,18 @@ const ACCESS_POINTS = [
   { label: 'Dorsalis Pedis', group: 'vasc', h: 0.02, x: -0.10, dir: 'top' },
   { label: 'Posterior Tibial', group: 'vasc', h: 0.045, x: 0.08, dir: 'back' },
   { label: 'Posterior Tibial', group: 'vasc', h: 0.045, x: -0.08, dir: 'back' },
+  // Robotic surgery (da Vinci X) port template — an in-line fan of four
+  // arm ports (one doubling as the camera port) plus one lower assistant port.
+  { label: 'Robotic Arm Port (8mm)', group: 'robot', h: 0.665, x: -0.32, dir: 'front' },
+  { label: 'Camera Port (8mm)', group: 'robot', h: 0.665, x: -0.11, dir: 'front' },
+  { label: 'Robotic Arm Port (8mm)', group: 'robot', h: 0.665, x: 0.11, dir: 'front' },
+  { label: 'Robotic Arm Port (8mm)', group: 'robot', h: 0.665, x: 0.32, dir: 'front' },
+  { label: 'Assistant Port (12mm)', group: 'robot', h: 0.50, x: -0.05, dir: 'front' },
 ];
 
-const LAP_COLOR = 0x3d8ee0;  // brighter azure — laparoscopic entry points
-const VASC_COLOR = 0x182f66; // deep indigo — vascular / catheter sites
+const LAP_COLOR = 0x3d8ee0;   // brighter azure — laparoscopic entry points
+const VASC_COLOR = 0x182f66;  // deep indigo — vascular / catheter sites
+const ROBOT_COLOR = 0x9d5fd6; // violet — robotic surgery (da Vinci X) ports
 
 // Small radial-gradient sprite for the "slightly white glow" around each dot.
 // Rendered at a high resolution with many soft gradient stops (rather than a
@@ -765,8 +785,10 @@ function makeGlowSprite(radius) {
 function buildAccessPointMarkers(model, box2, size2b, center2b) {
   const lapGroup = new THREE.Group();
   const vascGroup = new THREE.Group();
+  const robotGroup = new THREE.Group();
   lapGroup.visible = false;
   vascGroup.visible = false;
+  robotGroup.visible = false;
   const hitboxes = [];
   const raycaster = new THREE.Raycaster();
   const dotRadius = size2b.y * 0.0055;
@@ -774,6 +796,9 @@ function buildAccessPointMarkers(model, box2, size2b, center2b) {
   const hitGeo = new THREE.SphereGeometry(dotRadius * 2.2, 10, 8);
   const lapMat = new THREE.MeshBasicMaterial({ color: LAP_COLOR, transparent: true, opacity: 0.8 });
   const vascMat = new THREE.MeshBasicMaterial({ color: VASC_COLOR, transparent: true, opacity: 0.8 });
+  const robotMat = new THREE.MeshBasicMaterial({ color: ROBOT_COLOR, transparent: true, opacity: 0.8 });
+  const GROUP_MAT = { lap: lapMat, vasc: vascMat, robot: robotMat };
+  const GROUP_OBJ = { lap: lapGroup, vasc: vascGroup, robot: robotGroup };
   const meshes = [];
   model.traverse(o => { if (o.isMesh) meshes.push(o); });
   const margin = size2b.length() * 0.6;
@@ -811,10 +836,9 @@ function buildAccessPointMarkers(model, box2, size2b, center2b) {
     if (!hit) { console.warn('Access point missed the model surface:', pt.label); return; }
     const normal = hit.face.normal.clone().transformDirection(hit.object.matrixWorld).normalize();
     const surfacePoint = hit.point.clone().addScaledVector(normal, size2b.y * 0.002);
-    const isLap = pt.group === 'lap';
-    const targetGroup = isLap ? lapGroup : vascGroup;
+    const targetGroup = GROUP_OBJ[pt.group];
 
-    const dot = new THREE.Mesh(dotGeo, isLap ? lapMat : vascMat);
+    const dot = new THREE.Mesh(dotGeo, GROUP_MAT[pt.group]);
     dot.position.copy(surfacePoint);
     const glow = makeGlowSprite(size2b.y * 0.026);
     glow.position.copy(surfacePoint).addScaledVector(normal, size2b.y * 0.001);
@@ -824,7 +848,7 @@ function buildAccessPointMarkers(model, box2, size2b, center2b) {
     hitboxes.push({ mesh: hitbox, label: pt.label, group: pt.group });
   });
 
-  return { lap: lapGroup, vasc: vascGroup, hitboxes };
+  return { lap: lapGroup, vasc: vascGroup, robot: robotGroup, hitboxes };
 }
 
 // Two selectable looks for the écorché body. Both start from each
@@ -941,7 +965,7 @@ async function ensureEcorcheLoaded() {
     ecorcheCamPos = new THREE.Vector3(center2b.x, center2b.y + 0.15, center2b.z + dist);
 
     ecorcheAccessPoints = buildAccessPointMarkers(obj, box2, size2b, center2b);
-    scene.add(ecorcheAccessPoints.lap, ecorcheAccessPoints.vasc);
+    scene.add(ecorcheAccessPoints.lap, ecorcheAccessPoints.vasc, ecorcheAccessPoints.robot);
 
     statusEl.style.display = 'none';
     return obj;
@@ -966,11 +990,17 @@ async function applyPreset(key, cardEl) {
     accessPointsBox.hidden = false;
     bodyStyleRow.hidden = false;
     const model = await ensureEcorcheLoaded();
+    // The 30MB model can take a few seconds; if the user already switched to
+    // a different preset while it was loading, don't clobber their choice —
+    // without this guard the écorché model (now opaque in Classic) would pop
+    // back in on top of whatever the user picked, visually burying it.
+    if (activePresetKey !== 'whole') return;
     model.visible = true;
     useBloom = ecorcheBodyStyle === 'glow';
     if (ecorcheAccessPoints) {
       ecorcheAccessPoints.lap.visible = lapToggle.checked;
       ecorcheAccessPoints.vasc.visible = vascToggle.checked;
+      ecorcheAccessPoints.robot.visible = robotToggle.checked;
     }
     topbarH1.textContent = 'Male Full-Body';
     camera.position.copy(ecorcheCamPos);
@@ -983,8 +1013,9 @@ async function applyPreset(key, cardEl) {
   bodyStyleRow.hidden = true;
   lapToggle.checked = false;
   vascToggle.checked = false;
+  robotToggle.checked = false;
   useBloom = false;
-  if (ecorcheAccessPoints) { ecorcheAccessPoints.lap.visible = false; ecorcheAccessPoints.vasc.visible = false; }
+  if (ecorcheAccessPoints) { ecorcheAccessPoints.lap.visible = false; ecorcheAccessPoints.vasc.visible = false; ecorcheAccessPoints.robot.visible = false; }
   apTooltip.style.display = 'none';
   topbarH1.textContent = 'Abdominothoracic Region';
   if (ecorcheModel) ecorcheModel.visible = false;
@@ -1016,8 +1047,9 @@ document.getElementById('showAll').addEventListener('click', () => {
   bodyStyleRow.hidden = true;
   lapToggle.checked = false;
   vascToggle.checked = false;
+  robotToggle.checked = false;
   useBloom = false;
-  if (ecorcheAccessPoints) { ecorcheAccessPoints.lap.visible = false; ecorcheAccessPoints.vasc.visible = false; }
+  if (ecorcheAccessPoints) { ecorcheAccessPoints.lap.visible = false; ecorcheAccessPoints.vasc.visible = false; ecorcheAccessPoints.robot.visible = false; }
   apTooltip.style.display = 'none';
   topbarH1.textContent = 'Abdominothoracic Region';
   if (ecorcheModel) ecorcheModel.visible = false;
@@ -1030,12 +1062,18 @@ lapDot.style.color = '#' + LAP_COLOR.toString(16).padStart(6, '0');
 lapDot.style.background = lapDot.style.color;
 vascDot.style.color = '#' + VASC_COLOR.toString(16).padStart(6, '0');
 vascDot.style.background = vascDot.style.color;
+robotDot.style.color = '#' + ROBOT_COLOR.toString(16).padStart(6, '0');
+robotDot.style.background = robotDot.style.color;
 lapToggle.addEventListener('change', () => {
   if (ecorcheAccessPoints) ecorcheAccessPoints.lap.visible = lapToggle.checked;
   requestRender();
 });
 vascToggle.addEventListener('change', () => {
   if (ecorcheAccessPoints) ecorcheAccessPoints.vasc.visible = vascToggle.checked;
+  requestRender();
+});
+robotToggle.addEventListener('change', () => {
+  if (ecorcheAccessPoints) ecorcheAccessPoints.robot.visible = robotToggle.checked;
   requestRender();
 });
 styleClassicBtn.addEventListener('click', () => {
@@ -1054,8 +1092,7 @@ const apRaycaster = new THREE.Raycaster();
 const apMouseNdc = new THREE.Vector2();
 renderer.domElement.addEventListener('pointermove', (ev) => {
   if (!ecorcheAccessPoints || activePresetKey !== 'whole') return;
-  const visibleHitboxes = ecorcheAccessPoints.hitboxes.filter(h =>
-    (h.group === 'lap' ? ecorcheAccessPoints.lap.visible : ecorcheAccessPoints.vasc.visible));
+  const visibleHitboxes = ecorcheAccessPoints.hitboxes.filter(h => ecorcheAccessPoints[h.group]?.visible);
   if (!visibleHitboxes.length) { apTooltip.style.display = 'none'; return; }
   const rect = renderer.domElement.getBoundingClientRect();
   apMouseNdc.x = ((ev.clientX - rect.left) / rect.width) * 2 - 1;
@@ -1083,14 +1120,24 @@ document.getElementById('resetView').addEventListener('click', () => {
   bodyStyleRow.hidden = true;
   lapToggle.checked = false;
   vascToggle.checked = false;
+  robotToggle.checked = false;
   useBloom = false;
-  if (ecorcheAccessPoints) { ecorcheAccessPoints.lap.visible = false; ecorcheAccessPoints.vasc.visible = false; }
+  if (ecorcheAccessPoints) { ecorcheAccessPoints.lap.visible = false; ecorcheAccessPoints.vasc.visible = false; ecorcheAccessPoints.robot.visible = false; }
   apTooltip.style.display = 'none';
   if (ecorcheModel) ecorcheModel.visible = false;
   topbarH1.textContent = 'Abdominothoracic Region';
   applyGroupFilter(['heart', 'vasculature', 'organs']);
   camera.position.copy(defaultCamPos);
   controls.target.copy(defaultTarget);
+  // Back to the standard dark background too, in case white background was on.
+  whiteBg = false;
+  scene.background = new THREE.Color(0x141414);
+  if (hexGridRef) hexGridRef.visible = true;
+  if (logoMeshRef) logoMeshRef.visible = true;
+  bgToggleBtn.textContent = 'White background';
+  bgToggleBtn.classList.remove('active');
+  topbarEl.classList.remove('on-white');
+  hintEl.classList.remove('on-white');
   requestRender();
 });
 
