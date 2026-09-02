@@ -754,14 +754,16 @@ const ACCESS_POINTS = [
   { label: 'Posterior Tibial', group: 'vasc', h: 0.045, x: 0.08, dir: 'back' },
   { label: 'Posterior Tibial', group: 'vasc', h: 0.045, x: -0.08, dir: 'back' },
   // Robotic surgery port template — placed directly against a screenshot of
-  // this model with the real 5 port positions marked: RH/Camera/LH form one
-  // row across the upper abdomen, with two Assistant ports below, closer
-  // together and slightly lower.
-  { label: 'Camera (Endoscope)', group: 'robot', h: 0.675, x: 0, dir: 'front' },
-  { label: "RH (Surgeon's Right Hand)", group: 'robot', h: 0.675, x: -0.20, dir: 'front' },
-  { label: "LH (Surgeon's Left Hand)", group: 'robot', h: 0.675, x: 0.20, dir: 'front' },
-  { label: 'Assistant', group: 'robot', h: 0.64, x: -0.12, dir: 'front' },
-  { label: 'Assistant', group: 'robot', h: 0.64, x: 0.12, dir: 'front' },
+  // this model with the real 5 port positions marked, then relabeled per
+  // explicit correction: top row is Camera (center) + Assistant (both
+  // outer positions), bottom row is LH (left) + RH (right). All lowered
+  // ~10cm (≈0.057 of a ~175cm standing height) from the originally marked
+  // positions per feedback.
+  { label: 'Camera (Endoscope)', group: 'robot', h: 0.618, x: 0, dir: 'front' },
+  { label: 'Assistant', group: 'robot', h: 0.618, x: -0.20, dir: 'front' },
+  { label: 'Assistant', group: 'robot', h: 0.618, x: 0.20, dir: 'front' },
+  { label: "LH (Surgeon's Left Hand)", group: 'robot', h: 0.583, x: -0.12, dir: 'front' },
+  { label: "RH (Surgeon's Right Hand)", group: 'robot', h: 0.583, x: 0.12, dir: 'front' },
 ];
 
 const LAP_COLOR = 0x3d8ee0;   // brighter azure — laparoscopic entry points
@@ -951,6 +953,38 @@ function applyBodyStyle(styleName) {
   requestRender();
 }
 
+// One round of Laplacian smoothing: every vertex moves partway toward the
+// average position of the vertices it shares a triangle edge with. Cheap
+// (built once, lazily, only for the Obese variant) and version-safe, unlike
+// trying to detect/suppress specific "muscle ridge" geometry.
+function smoothGeometry(geo, iterations, strength) {
+  const pos = geo.attributes.position;
+  const index = geo.getIndex();
+  if (!index) return;
+  const n = pos.count;
+  const idx = index.array;
+  const sumX = new Float32Array(n), sumY = new Float32Array(n), sumZ = new Float32Array(n);
+  const count = new Int32Array(n);
+  for (let iter = 0; iter < iterations; iter++) {
+    sumX.fill(0); sumY.fill(0); sumZ.fill(0); count.fill(0);
+    for (let t = 0; t < idx.length; t += 3) {
+      const a = idx[t], b = idx[t + 1], c = idx[t + 2];
+      accum(a, b); accum(b, a); accum(b, c); accum(c, b); accum(c, a); accum(a, c);
+    }
+    for (let i = 0; i < n; i++) {
+      if (!count[i]) continue;
+      const x = pos.getX(i), y = pos.getY(i), z = pos.getZ(i);
+      const ax = sumX[i] / count[i], ay = sumY[i] / count[i], az = sumZ[i] / count[i];
+      pos.setXYZ(i, x + (ax - x) * strength, y + (ay - y) * strength, z + (az - z) * strength);
+    }
+  }
+  pos.needsUpdate = true;
+  function accum(from, to) {
+    sumX[from] += pos.getX(to); sumY[from] += pos.getY(to); sumZ[from] += pos.getZ(to);
+    count[from]++;
+  }
+}
+
 // --- "Obese" body type: a procedurally-deformed clone of the standard ----
 // écorché mesh. There's no separate sculpted asset for this, so each mesh's
 // geometry is cloned, its world-space transform baked in directly (so the
@@ -970,11 +1004,28 @@ function buildObeseVariant(baseModel) {
 
   const bodyCenterY = worldBox.min.y + worldSize.y * 0.50;
   const bodyFalloff = worldSize.y * 0.35;
-  const bodyMaxScale = 0.35; // up to +35% radial thickness at peak (torso, arms, legs alike)
+  const bodyMaxScale = 0.35; // up to +35% radial thickness at peak, torso only (see coreWeight below)
 
   const bellyY = worldBox.min.y + worldSize.y * 0.58;
   const bellyFalloff = worldSize.y * 0.09;
   const bellyPush = worldSize.y * 0.09;
+
+  // A height-varying scale looks right for the torso (it should taper into
+  // a round belly) but is wrong for limbs: scaling a straight arm by a
+  // factor that changes along its length bows it, since the "how far out"
+  // amount then varies with height instead of staying constant — a straight
+  // line under a *constant* scale stays straight, but under a *varying*
+  // one doesn't. So vertices far enough from the central axis to be a limb
+  // rather than torso get a flat, height-independent thickening instead.
+  const torsoRadius = worldSize.y * 0.12;
+  const torsoTransition = worldSize.y * 0.035;
+  const limbBoost = 0.34; // uniform limb thickness (arms, legs, hands), no height dependence
+
+  // A second, lower bulge for full hips/glutes/upper-thigh, on top of the
+  // general torso taper and the belly.
+  const hipY = worldBox.min.y + worldSize.y * 0.47;
+  const hipFalloff = worldSize.y * 0.08;
+  const hipPush = worldSize.y * 0.075;
 
   const v = new THREE.Vector3();
 
@@ -1004,9 +1055,11 @@ function buildObeseVariant(baseModel) {
     for (let i = 0; i < pos.count; i++) {
       v.fromBufferAttribute(pos, i);
       const dxBody = v.x - worldCenter.x, dzBody = v.z - worldCenter.z;
+      const radialDist = Math.sqrt(dxBody * dxBody + dzBody * dzBody);
+      const coreWeight = THREE.MathUtils.clamp(1 - (radialDist - torsoRadius) / torsoTransition, 0, 1);
       const dyBody = v.y - bodyCenterY;
       const bodyWeight = Math.exp(-(dyBody * dyBody) / (2 * bodyFalloff * bodyFalloff));
-      const scale = 1 + bodyMaxScale * bodyWeight;
+      const scale = 1 + bodyMaxScale * bodyWeight * coreWeight + limbBoost * (1 - coreWeight);
       let nx = worldCenter.x + dxBody * scale;
       let nz = worldCenter.z + dzBody * scale;
 
@@ -1019,9 +1072,30 @@ function buildObeseVariant(baseModel) {
         nx += (ndx / radial) * push;
         nz += (ndz / radial) * push;
       }
+
+      const dyHip = v.y - hipY;
+      const hipWeight = Math.exp(-(dyHip * dyHip) / (2 * hipFalloff * hipFalloff));
+      if (hipWeight > 0.002) {
+        const ndx = nx - worldCenter.x, ndz = nz - worldCenter.z;
+        const radial = Math.sqrt(ndx * ndx + ndz * ndz) || 0.0001;
+        const push = hipPush * hipWeight;
+        nx += (ndx / radial) * push;
+        nz += (ndz / radial) * push;
+      }
       pos.setXYZ(i, nx, v.y, nz);
     }
     pos.needsUpdate = true;
+    // A few rounds of light Laplacian smoothing (each vertex nudged toward
+    // the average of its direct neighbors) — the underlying écorché mesh
+    // sculpts muscle/tendon definition (abs, forearm tendons) directly into
+    // the geometry, not just the texture, so nulling the map alone left
+    // those ridges intact; scaling the whole limb up by a constant factor
+    // then exaggerated them further (a ridge sits further from the central
+    // axis than the "valleys" beside it, so it gets pushed out more).
+    // Smoothing preferentially washes out that small-scale relief while a
+    // handful of light passes leaves the large-scale belly/hip bulges
+    // (which are broad, low-frequency shapes) essentially intact.
+    smoothGeometry(geo, 8, 0.6);
     geo.computeVertexNormals();
     const srcMats = Array.isArray(o.material) ? o.material : [o.material];
     const mats = srcMats.map(m => {
@@ -1039,6 +1113,12 @@ function buildObeseVariant(baseModel) {
         clone.userData.baseRoughness = m.userData.baseRoughness;
         clone.userData.baseMetalness = m.userData.baseMetalness;
       }
+      // Drop the baked photographic muscle texture (definition, striations)
+      // — stretched over a bulged belly it reads as a six-pack painted onto
+      // a balloon rather than actual fat. A flat shaded surface (just the
+      // tinted base color) looks like soft tissue instead.
+      clone.map = clone.normalMap = clone.roughnessMap = clone.metalnessMap = clone.aoMap = clone.bumpMap = null;
+      clone.needsUpdate = true;
       return clone;
     });
     group.add(new THREE.Mesh(geo, mats.length > 1 ? mats : mats[0]));
