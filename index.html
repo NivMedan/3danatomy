@@ -734,18 +734,20 @@ const ACCESS_POINTS = [
   { label: 'Dorsalis Pedis', group: 'vasc', h: 0.02, x: -0.10, dir: 'top' },
   { label: 'Posterior Tibial', group: 'vasc', h: 0.045, x: 0.08, dir: 'back' },
   { label: 'Posterior Tibial', group: 'vasc', h: 0.045, x: -0.08, dir: 'back' },
-  // Robotic surgery (da Vinci X) port template — an in-line fan of four
-  // arm ports (one doubling as the camera port) plus one lower assistant port.
-  { label: 'Robotic Arm Port (8mm)', group: 'robot', h: 0.665, x: -0.32, dir: 'front' },
-  { label: 'Camera Port (8mm)', group: 'robot', h: 0.665, x: -0.11, dir: 'front' },
-  { label: 'Robotic Arm Port (8mm)', group: 'robot', h: 0.665, x: 0.11, dir: 'front' },
-  { label: 'Robotic Arm Port (8mm)', group: 'robot', h: 0.665, x: 0.32, dir: 'front' },
-  { label: 'Assistant Port (12mm)', group: 'robot', h: 0.50, x: -0.05, dir: 'front' },
+  // Robotic surgery port template — a central camera port, one assistant
+  // port above/lateral, and three da Vinci arm ports fanning out to one
+  // side (asymmetric, matching a real procedure-specific port plan rather
+  // than a generic symmetric grid).
+  { label: 'Camera Port', group: 'robot', h: 0.63, x: 0, dir: 'front' },
+  { label: 'Assistant Port', group: 'robot', h: 0.685, x: 0.16, dir: 'front' },
+  { label: 'da Vinci Arm Port', group: 'robot', h: 0.575, x: -0.20, dir: 'front' },
+  { label: 'da Vinci Arm Port', group: 'robot', h: 0.615, x: 0.185, dir: 'front' },
+  { label: 'da Vinci Arm Port', group: 'robot', h: 0.52, x: 0.215, dir: 'front' },
 ];
 
 const LAP_COLOR = 0x3d8ee0;   // brighter azure — laparoscopic entry points
 const VASC_COLOR = 0x182f66;  // deep indigo — vascular / catheter sites
-const ROBOT_COLOR = 0x9d5fd6; // violet — robotic surgery (da Vinci X) ports
+const ROBOT_COLOR = 0x9d5fd6; // violet — robotic surgery ports
 
 // Small radial-gradient sprite for the "slightly white glow" around each dot.
 // Rendered at a high resolution with many soft gradient stops (rather than a
