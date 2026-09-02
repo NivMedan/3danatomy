@@ -1,0 +1,1106 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
+<title>MentorLearn 3D Anatomy — Real Mesh Prototype (Local Only)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #141414; --panel: #1F1F1F; --panel-2: #292929; --panel-3: #333333;
+    --border: rgba(255,255,255,0.3); --border-soft: rgba(255,255,255,0.2);
+    --text: rgba(255,255,255,0.9); --text-dim: rgba(255,255,255,0.6); --text-disabled: rgba(255,255,255,0.3);
+    --accent: #90AECD; --accent-hover: rgba(144,174,205,0.2); --accent-selected: rgba(144,174,205,0.3);
+    --brand: #F9423A; --alert: #FE5656; --alert-bg: #A52E22;
+    --radius-sm: 4px; --radius-md: 8px; --radius-lg: 12px; --radius-xl: 16px;
+    --size-xxs: 16px; --size-xs: 24px; --size-s: 32px; --size-m: 40px; --size-l: 48px;
+    --font-body: 'Inter', -apple-system, "Segoe UI", system-ui, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text); font-family: var(--font-body); overflow: hidden; }
+  #app { display: flex; height: 100%; }
+  #viewport { position: relative; flex: 1; }
+  #viewport canvas { display: block; }
+
+  #topbar {
+    position: absolute; top: 0; left: 0; right: 0; padding: 14px 18px;
+    display: flex; align-items: baseline; gap: 10px;
+    background: linear-gradient(to bottom, rgba(15,17,21,0.85), transparent);
+    pointer-events: none;
+  }
+  #topbar h1 { font-size: 18px; margin: 0; font-weight: 600; letter-spacing: 0.2px; color: var(--text); }
+  #topbar span { font-size: 12px; color: var(--text-dim); font-weight: 400; }
+  #topbar.on-white h1 { color: #1a1a1a; }
+  #topbar.on-white span { color: rgba(0,0,0,0.55); }
+  #topbar.on-white { background: linear-gradient(to bottom, rgba(255,255,255,0.85), transparent); }
+
+  #hint { position: absolute; bottom: 14px; left: 18px; font-size: 12px; color: var(--text-dim); }
+  #hint.on-white { color: rgba(0,0,0,0.55); }
+
+  #sidebar {
+    width: 340px; flex-shrink: 0; background: var(--panel); border-left: 1px solid var(--border);
+    display: flex; flex-direction: column; height: 100%;
+  }
+  #sidebar-header { padding: var(--size-xs) var(--size-xs) var(--size-xxs); border-bottom: 1px solid var(--border); }
+  #sidebar-header h2 { margin: 0 0 4px; font-size: 16px; font-weight: 600; color: var(--text); }
+  #sidebar-header p { margin: 0; font-size: 12px; color: var(--text-dim); line-height: 1.4; font-weight: 400; }
+
+  .section-label {
+    padding: var(--size-xs) var(--size-xs) 0; margin: 0 0 -6px;
+    font-size: 11px; font-weight: 600; letter-spacing: 0.4px; text-transform: uppercase; color: var(--text-dim);
+  }
+
+  #presets { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; padding: var(--size-xxs) var(--size-xs) 0; }
+  .preset-card {
+    display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 12px 8px;
+    border-radius: var(--radius-lg); border: 1px solid var(--border);
+    background: rgba(144,174,205,0.07); color: var(--text); cursor: pointer;
+    transition: background 0.15s, border-color 0.15s, transform 0.1s; font-family: var(--font-body);
+  }
+  .preset-card:hover { background: var(--accent-hover); border-color: var(--accent); }
+  .preset-card.active { background: var(--accent-selected); border-color: var(--accent); }
+  .preset-icon { width: 26px; height: 26px; color: var(--accent); }
+  .preset-card .label { font-size: 12px; font-weight: 500; }
+  .preset-card.wide { grid-column: 1 / -1; flex-direction: row; justify-content: center; gap: 10px; padding: 10px 8px; }
+
+  #groups { flex: 1; overflow-y: auto; padding: var(--size-xxs) var(--size-xxs) 20px; }
+
+  .group { margin-bottom: 10px; border-radius: var(--radius-lg); overflow: hidden; border: 1px solid var(--border); background: transparent; }
+  .group-head {
+    display: flex; align-items: center; gap: 10px; height: var(--size-m); padding: 0 var(--size-xxs);
+    cursor: pointer; background: transparent; transition: background 0.12s;
+  }
+  .group-head:hover { background: var(--accent-hover); }
+  .group-head input[type="checkbox"] { accent-color: var(--accent); width: var(--size-xxs); height: var(--size-xxs); cursor: pointer; }
+  .group-dot { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; }
+  .group-title { flex: 1; font-size: 13px; font-weight: 500; color: var(--text); }
+  .group-count { font-size: 12px; color: var(--text-dim); background: var(--panel-2); padding: 1px 7px; border-radius: var(--radius-xl); }
+  .group-chevron { font-size: 11px; color: var(--text-dim); transition: transform 0.15s; width: 12px; text-align: center; }
+  .group.open .group-chevron { transform: rotate(180deg); }
+  .group.open .group-head { background: var(--accent-selected); border-bottom: 1px solid var(--border); }
+
+  .group-items { max-height: 0; overflow: hidden; transition: max-height 0.2s ease; }
+  .group.open .group-items { max-height: 900px; }
+  .item-row { display: flex; align-items: center; gap: 8px; height: var(--size-s); padding: 0 var(--size-xxs) 0 40px; font-size: 12px; color: var(--text-dim); font-weight: 400; }
+  .item-row input { accent-color: var(--accent); width: 14px; height: 14px; }
+  .item-row label { cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  #actions { display: flex; flex-wrap: wrap; gap: 8px; padding: var(--size-xxs) var(--size-xs); border-bottom: 1px solid var(--border); }
+  #actions button {
+    flex: 1; min-width: 90px; height: var(--size-m); font-size: 13px; font-weight: 500; border-radius: var(--radius-md); border: 1px solid var(--border);
+    background: var(--panel-2); color: var(--text); cursor: pointer; font-family: var(--font-body);
+    transition: background 0.12s, border-color 0.12s;
+  }
+  #actions button:hover { background: var(--accent-hover); border-color: var(--accent); }
+  #actions button.active { background: var(--accent-selected); border-color: var(--accent); }
+
+  #accessPointsBox { margin: var(--size-xxs) var(--size-xs) 0; }
+  #accessPointsBox[hidden] { display: none; }
+  .ap-row {
+    display: flex; align-items: center; gap: 8px; margin-top: 6px;
+    padding: 10px var(--size-xxs); border: 1px solid var(--border-soft); border-radius: var(--radius-md);
+    font-size: 12px; color: var(--text); cursor: pointer; background: var(--panel-2);
+  }
+  .ap-row:first-child { margin-top: 0; }
+  .ap-row input { accent-color: var(--accent); width: 14px; height: 14px; cursor: pointer; }
+  .ap-row small { color: var(--text-dim); font-weight: 400; }
+  .ap-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; box-shadow: 0 0 6px 1px currentColor; }
+  .ap-icon { width: 17px; height: 17px; flex-shrink: 0; color: var(--text-dim); }
+
+  #bodyStyleRow {
+    display: flex; align-items: center; gap: 8px; margin: var(--size-xxs) var(--size-xs) 0;
+    padding: 10px var(--size-xxs); border: 1px solid var(--border-soft); border-radius: var(--radius-md);
+    background: var(--panel-2);
+  }
+  #bodyStyleRow[hidden] { display: none; }
+  #bodyStyleRow span.lbl { font-size: 12px; color: var(--text-dim); }
+  #bodyStyleRow .style-btns { display: flex; gap: 6px; margin-left: auto; }
+  #bodyStyleRow .style-btns button {
+    flex: 1 0 64px; font-size: 12px; font-weight: 500; padding: 6px 10px; border-radius: var(--radius-sm);
+    border: 1px solid var(--border); background: var(--panel-3); color: var(--text-dim); cursor: pointer;
+    font-family: var(--font-body); text-align: center;
+  }
+  #bodyStyleRow .style-btns button.active { background: var(--accent-selected); border-color: var(--accent); color: var(--text); }
+
+  #apTooltip {
+    position: absolute; pointer-events: none; z-index: 10; transform: translate(-50%, -130%);
+    background: rgba(20,20,20,0.92); border: 1px solid var(--border-soft); border-radius: var(--radius-sm);
+    padding: 5px 9px; font-size: 12px; color: var(--text); white-space: nowrap; display: none;
+  }
+
+  #status { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); font-size: 13px; color: var(--text-dim); text-align: center; width: 280px; }
+  #status .bar { height: 4px; background: var(--panel-2); border-radius: 2px; margin-top: 10px; overflow: hidden; }
+  #status .bar-fill { height: 100%; background: var(--accent); width: 0%; transition: width 0.15s; }
+
+  /* Responsive: stack the 3D view above a scrollable sidebar instead of a
+     fixed side-by-side layout once there isn't room for both comfortably. */
+  @media (max-width: 860px) {
+    html, body { overflow: auto; }
+    #app { flex-direction: column; height: auto; min-height: 100%; }
+    #viewport { flex: 0 0 58vh; min-height: 320px; }
+    #sidebar { width: 100%; flex: 1 1 auto; border-left: none; border-top: 1px solid var(--border); max-height: none; }
+    #groups { max-height: 46vh; }
+    #status { width: 88vw; max-width: 280px; }
+  }
+  @media (max-width: 520px) {
+    #topbar h1 { font-size: 16px; }
+    #presets { grid-template-columns: 1fr 1fr; }
+    #actions button { min-width: 0; font-size: 12px; }
+    #viewport { flex-basis: 50vh; }
+  }
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="viewport">
+    <div id="topbar">
+      <h1>Abdominothoracic Region</h1>
+      <span>MentorLearn 3D Anatomy</span>
+    </div>
+    <div id="hint">Drag to rotate · Scroll to zoom · Right-drag to pan</div>
+    <div id="status">Loading parts…<div class="bar"><div class="bar-fill" id="bar-fill"></div></div></div>
+    <div id="apTooltip"></div>
+  </div>
+  <div id="sidebar">
+    <div id="sidebar-header">
+      <h2>3D Anatomy Viewer</h2>
+      <p>Pick a preset for a quick view, or toggle individual systems below.</p>
+    </div>
+    <div class="section-label">Presets</div>
+    <div id="presets"></div>
+    <div class="section-label">Anatomy Layers</div>
+    <div id="actions">
+      <button id="showAll">Show all</button>
+      <button id="resetView">Reset view</button>
+      <button id="bgToggle">White background</button>
+    </div>
+    <div id="bodyStyleRow" hidden>
+      <span class="lbl">Body appearance</span>
+      <div class="style-btns">
+        <button id="styleClassic" class="active">Classic</button>
+        <button id="styleGlow">Glow</button>
+      </div>
+    </div>
+    <div id="accessPointsBox" hidden>
+      <label class="ap-row">
+        <input type="checkbox" id="lapToggle" />
+        <svg class="ap-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="5" cy="18.2" r="2.5"/><circle cx="9.2" cy="18.2" r="2.5"/>
+          <line x1="10.6" y1="16.6" x2="18.5" y2="6.5"/><line x1="18.5" y1="6.5" x2="20.5" y2="4.2"/>
+        </svg>
+        <span class="ap-dot" id="lapDot"></span>
+        <span>Laparoscopic access points</span>
+      </label>
+      <label class="ap-row">
+        <input type="checkbox" id="vascToggle" />
+        <svg class="ap-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M3 18.5c3-1 3-4 6-4s3 3.2 6 2.7 2.7-3.7 5.5-4.4"/>
+          <circle cx="19.3" cy="6" r="1.6"/><path d="M19.3 7.6c0 2.6-1.8 3.6-1.8 3.6"/>
+        </svg>
+        <span class="ap-dot" id="vascDot"></span>
+        <span>Vascular access points</span>
+      </label>
+    </div>
+    <div id="groups"></div>
+  </div>
+</div>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+  }
+}
+</script>
+<script type="module">
+import * as THREE from 'three';
+import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
+
+const viewport = document.getElementById('viewport');
+const groupsEl = document.getElementById('groups');
+const presetsEl = document.getElementById('presets');
+const statusEl = document.getElementById('status');
+const barFillEl = document.getElementById('bar-fill');
+const topbarEl = document.getElementById('topbar');
+const topbarH1 = topbarEl.querySelector('h1');
+const hintEl = document.getElementById('hint');
+const accessPointsBox = document.getElementById('accessPointsBox');
+const lapToggle = document.getElementById('lapToggle');
+const vascToggle = document.getElementById('vascToggle');
+const lapDot = document.getElementById('lapDot');
+const vascDot = document.getElementById('vascDot');
+const bodyStyleRow = document.getElementById('bodyStyleRow');
+const styleClassicBtn = document.getElementById('styleClassic');
+const styleGlowBtn = document.getElementById('styleGlow');
+const apTooltip = document.getElementById('apTooltip');
+
+const GROUP_META = [
+  { key: 'skeleton',   title: 'Skeleton',   color: '#e8dcc0' },
+  { key: 'muscles',    title: 'Abdominal Wall Muscles', color: '#c9645f' },
+  { key: 'heart',      title: 'Heart',      color: '#ff4d4d' },
+  { key: 'vasculature',title: 'Vasculature',color: '#e03131' },
+  { key: 'organs',     title: 'Organs',     color: '#d9822b' },
+  { key: 'ducts',      title: 'Ducts',      color: '#22B8CF' },
+];
+
+// "subtype" drives sub-coloring for items consolidated under the "organs" menu
+// (solid organs / GI tract / diaphragm all live in one accordion now, but
+// keep their own tint so they're still readable individually).
+const CLASSIFICATION = [
+  { group: 'skeleton', label: 'Pelvis', file: 'pelvic.FBX', dir: 'FAST' },
+  { group: 'skeleton', label: 'Spine', file: 'Spine.fbx', dir: 'FAST' },
+
+  { group: 'muscles', label: 'External Obliques Muscle', file: 'External_Obliques_Muscle.fbx', dir: 'Abdominal' },
+  { group: 'muscles', label: 'External Obliques Muscle Left', file: 'External_Obliques_Muscle_Left.fbx', dir: 'Abdominal' },
+  { group: 'muscles', label: 'External Obliques Muscle Right', file: 'External_Obliques_Muscle_Right.fbx', dir: 'Abdominal' },
+  { group: 'muscles', label: 'Internal Obliques Muscle', file: 'Internal_Obliques_Muscle.fbx', dir: 'Abdominal' },
+  { group: 'muscles', label: 'Internal Obliques Muscle Left', file: 'Internal_Obliques_Muscle_Left.fbx', dir: 'Abdominal' },
+  { group: 'muscles', label: 'Internal Obliques Muscle Right', file: 'Internal_Obliques_Muscle_Right.fbx', dir: 'Abdominal' },
+  { group: 'muscles', label: 'Rectus Abdominus Muscle', file: 'Rectus_Abdominus_Muscle.fbx', dir: 'Abdominal' },
+  { group: 'muscles', label: 'Transversus Abdominis Muscle', file: 'Transversus_Abdominis_Muscle.fbx', dir: 'Abdominal' },
+
+  { group: 'heart', label: 'Heart Inner', file: 'Heart_Inner.fbx', dir: 'Abdominal' },
+  { group: 'heart', label: 'Aorta Heart', file: 'Aorta_Heart.fbx', dir: 'Abdominal' },
+  { group: 'heart', label: 'IVC Heart', file: 'IVC_Heart.fbx', dir: 'Abdominal' },
+  { group: 'heart', label: 'Pericardium', file: 'Pericardium.fbx', dir: 'Abdominal' },
+
+  { group: 'vasculature', label: 'Aorta in', file: 'Aorta_in.fbx', dir: 'Abdominal' },
+  { group: 'vasculature', label: 'Aorta out', file: 'Aorta_out.fbx', dir: 'Abdominal' },
+  { group: 'vasculature', label: 'Celiac trunk', file: 'Celiac_trunk.fbx', dir: 'Abdominal' },
+  { group: 'vasculature', label: 'Hepatic Artery', file: 'Hepatic_Artery.fbx', dir: 'Abdominal' },
+  { group: 'vasculature', label: 'Iliac Left Inner', file: 'Iliac_Left_Inner.fbx', dir: 'Abdominal' },
+  { group: 'vasculature', label: 'Iliac Right Inner', file: 'Iliac_Right_Inner.fbx', dir: 'Abdominal' },
+  { group: 'vasculature', label: 'Iliac Vein Left Inner', file: 'Iliac_Vein_Left_Inner.fbx', dir: 'Abdominal' },
+  { group: 'vasculature', label: 'Iliac Vein Right Inner', file: 'Iliac_Vein_Right_Inner.fbx', dir: 'Abdominal' },
+  { group: 'vasculature', label: 'IVC in', file: 'IVC_in.fbx', dir: 'Abdominal' },
+  { group: 'vasculature', label: 'IVC out', file: 'IVC_out.fbx', dir: 'Abdominal' },
+  { group: 'vasculature', label: 'Left Renal artery', file: 'Left_Renal_artery.fbx', dir: 'Abdominal' },
+  { group: 'vasculature', label: 'Left Renal vein', file: 'Left_Renal_vein.fbx', dir: 'Abdominal' },
+  { group: 'vasculature', label: 'Portal Vein', file: 'Portal_Vein.fbx', dir: 'Abdominal' },
+  { group: 'vasculature', label: 'Right Renal artery', file: 'Right_Renal_artery.fbx', dir: 'Abdominal' },
+  { group: 'vasculature', label: 'Right Renal vein', file: 'Right_Renal_vein.fbx', dir: 'Abdominal' },
+  { group: 'vasculature', label: 'SMA', file: 'SMA.fbx', dir: 'Abdominal' },
+  { group: 'vasculature', label: 'Splenic Artery', file: 'Splenic_Artery.fbx', dir: 'Abdominal' },
+
+  { group: 'organs', subtype: 'muscle', label: 'Diaphragm', file: 'Diaphragm.fbx', dir: 'Abdominal' },
+  { group: 'organs', subtype: 'solid', label: 'Kidney Cortex Left', file: 'Kidney_Cortex_Left.fbx', dir: 'Abdominal' },
+  { group: 'organs', subtype: 'solid', label: 'Kidney Cortex Right', file: 'Kidney_Cortex_Right.fbx', dir: 'Abdominal' },
+  { group: 'organs', subtype: 'solid', label: 'Liver', file: 'Liver.fbx', dir: 'Abdominal' },
+  { group: 'organs', subtype: 'solid', label: 'Pancreas', file: 'Pancreas.fbx', dir: 'Abdominal' },
+  { group: 'organs', subtype: 'solid', label: 'Prostate', file: 'Prostate.fbx', dir: 'Abdominal' },
+  { group: 'organs', subtype: 'solid', label: 'Spleen', file: 'Spleen.fbx', dir: 'Abdominal' },
+  { group: 'organs', subtype: 'gi', label: 'Appendix', file: 'Appendix.FBX', dir: 'Abdominal' },
+  { group: 'organs', subtype: 'gi', label: 'Colon', file: 'Colon.fbx', dir: 'Abdominal' },
+  { group: 'organs', subtype: 'gi', label: 'SmallIntestine', file: 'SmallIntestine.fbx', dir: 'Abdominal' },
+  { group: 'organs', subtype: 'gi', label: 'Stomach Inner', file: 'Stomach_Inner.fbx', dir: 'Abdominal' },
+
+  { group: 'ducts', label: 'CBD', file: 'CBD.fbx', dir: 'Abdominal' },
+  { group: 'ducts', label: 'CBD Inner', file: 'CBD_Inner.fbx', dir: 'Abdominal' },
+  { group: 'ducts', label: 'Ejaculatory Duct Left', file: 'Ejaculatory_Duct_Left.fbx', dir: 'Abdominal' },
+  { group: 'ducts', label: 'Ejaculatory Duct Right', file: 'Ejaculatory_Duct_Right.fbx', dir: 'Abdominal' },
+  { group: 'ducts', label: 'Ureter Left', file: 'Ureter_Left.fbx', dir: 'Abdominal' },
+  { group: 'ducts', label: 'Ureter Right', file: 'Ureter_Right.fbx', dir: 'Abdominal' },
+  { group: 'ducts', label: 'Urethra', file: 'Urethra.fbx', dir: 'Abdominal' },
+];
+
+// --- Color / opacity system ------------------------------------------------
+const GROUP_STYLE = {
+  skeleton:   { color: '#e8dcc0', opacity: 0.63 },
+  muscles:    { color: '#a84444', opacity: 0.15 },
+  heart:      { color: '#e03131', opacity: 0.23 },
+  ducts:      { color: '#22B8CF', opacity: 0.43 },
+};
+const ORGAN_SUBSTYLE = {
+  solid:  { color: '#d9822b', opacity: 0.48 },
+  gi:     { color: '#6c8ba3', opacity: 0.38 },
+  muscle: { color: '#a84444', opacity: 0.30 }, // diaphragm — real tissue is muscle, filed under Organs menu
+};
+const ARTERY_STYLE = { color: '#e03131', opacity: 0.33 }; // oxygenated: left ventricle -> aorta -> body
+const VEIN_STYLE   = { color: '#5c5cb3', opacity: 0.33 }; // deoxygenated: body -> venae cavae -> right atrium
+const HEART_INNER_STYLE = { color: '#ff2e2e', opacity: 0.60 }; // deliberately more distinct/visible than the rest of the heart group
+
+function isVein(file) { return /vein|^ivc/i.test(file); }
+function styleFor(item) {
+  if (item.file === 'Heart_Inner.fbx') return HEART_INNER_STYLE;
+  if (item.group === 'vasculature' || /^aorta|^ivc/i.test(item.file)) {
+    return isVein(item.file) ? VEIN_STYLE : ARTERY_STYLE;
+  }
+  if (item.group === 'organs') return ORGAN_SUBSTYLE[item.subtype] || ORGAN_SUBSTYLE.solid;
+  return GROUP_STYLE[item.group] || { color: '#999999', opacity: 0.4 };
+}
+
+function itemsForGroup(key) {
+  const items = CLASSIFICATION.filter(c => c.group === key).map(c => ({ label: c.label, file: c.file }));
+  return items;
+}
+
+const PRESET_ICONS = {
+  skeleton: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><circle cx="12" cy="4.2" r="2.2"/><line x1="12" y1="6.4" x2="12" y2="17"/><line x1="8" y1="9.5" x2="16" y2="9.5"/><line x1="8" y1="12.5" x2="16" y2="12.5"/><ellipse cx="12" cy="19.3" rx="4" ry="2.1"/></svg>',
+  organs: '<svg viewBox="0 0 24 24" fill="currentColor" fill-opacity="0.85" stroke="none"><circle cx="9.5" cy="10" r="6.2"/><circle cx="16" cy="14.5" r="4.2"/></svg>',
+  vascular: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><line x1="12" y1="2.5" x2="12" y2="10"/><line x1="12" y1="10" x2="6" y2="19"/><line x1="12" y1="10" x2="18" y2="19"/><line x1="9.3" y1="14.2" x2="6.3" y2="14.2"/><line x1="14.7" y1="14.2" x2="17.7" y2="14.2"/></svg>',
+  heart: '<svg viewBox="0 0 24 24" fill="currentColor" fill-opacity="0.85" stroke="none"><rect x="8.3" y="1.6" width="2.1" height="5.6" rx="1.05" transform="rotate(-12 9.35 4.4)"/><rect x="13.6" y="1.6" width="2.1" height="5.6" rx="1.05" transform="rotate(12 14.65 4.4)"/><path d="M12 21.5c-3.6-2.7-9-7.4-9-12.3 0-3.1 2.2-5.3 5-5.3 1.7 0 3 .8 4 2.3 1-1.5 2.3-2.3 4-2.3 2.8 0 5 2.2 5 5.3 0 4.9-5.4 9.6-9 12.3z"/></svg>',
+  whole: '<svg viewBox="0 0 24 24" fill="currentColor" fill-opacity="0.85" stroke="none"><circle cx="12" cy="4.3" r="2.4"/><path d="M12 8c-3.1 0-5.6 1.9-5.6 4.6 0 1.6.8 2.9 2 3.8l-1 6.6h9.2l-1-6.6c1.2-.9 2-2.2 2-3.8 0-2.7-2.5-4.6-5.6-4.6z"/></svg>',
+};
+const PRESETS = [
+  { key: 'skeleton', label: 'Skeleton', groups: ['skeleton'] },
+  { key: 'organs', label: 'Organs', groups: ['organs'] },
+  { key: 'vascular', label: 'Vascular', groups: ['vasculature'] },
+  { key: 'heart', label: 'Heart', groups: ['heart'] },
+  // "Whole Body" doesn't toggle groups like the others — it switches to the
+  // separate high-quality full-body écorché model (real photographic muscle
+  // texture, real limbs/head) instead of the torso-only organ assembly,
+  // which has no way to approximate that. See ensureEcorcheLoaded/applyPreset.
+  { key: 'whole', label: 'Whole Body', wide: true },
+];
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x141414);
+
+const camera = new THREE.PerspectiveCamera(45, 1, 0.01, 5000);
+camera.position.set(0, 1.4, 3.2);
+
+const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+viewport.appendChild(renderer.domElement);
+
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+controls.dampingFactor = 0.1;
+// Default OrbitControls has no zoom bounds: dolly is multiplicative, so
+// scrolling in kept shrinking the remaining distance by a fixed ratio each
+// tick — it never actually stops, but the per-tick movement becomes
+// imperceptible well before it "feels" like it's still zooming, and
+// scrolling out unbounded can eventually push the camera past the far
+// clipping plane (or just absurdly far from the model). Explicit min/max
+// distances keep scroll zoom feeling bounded and responsive both ways.
+controls.minDistance = 0.12;
+controls.maxDistance = 15;
+controls.zoomSpeed = 0.9;
+controls.addEventListener('change', requestRender);
+
+scene.add(new THREE.HemisphereLight(0xffffff, 0x1a1a1a, 1.3));
+const dirLight = new THREE.DirectionalLight(0xffffff, 1.6);
+dirLight.position.set(2, 4, 3);
+scene.add(dirLight);
+const dirLight2 = new THREE.DirectionalLight(0xffffff, 0.6);
+dirLight2.position.set(-2, 1, -3);
+scene.add(dirLight2);
+
+let defaultCamPos = camera.position.clone();
+let defaultTarget = new THREE.Vector3(0, 1, 0);
+
+// Bloom post-processing, used only for the "Glow" body-appearance style —
+// everything else renders through the plain renderer so normal views pay no
+// extra cost. Threshold is tuned so only the Glow style's boosted emissive
+// materials (see BODY_STYLES.glow) exceed it and actually bloom.
+const composer = new EffectComposer(renderer);
+composer.addPass(new RenderPass(scene, camera));
+// Kept deliberately gentle — a soft edge glow, not a bright/blown-out wash.
+const bloomPass = new UnrealBloomPass(new THREE.Vector2(1, 1), 0.35, 0.35, 0.72);
+composer.addPass(bloomPass);
+composer.addPass(new OutputPass());
+let useBloom = false;
+
+function resize() {
+  const w = viewport.clientWidth, h = viewport.clientHeight;
+  camera.aspect = w / h;
+  camera.updateProjectionMatrix();
+  renderer.setSize(w, h);
+  composer.setSize(w, h);
+  requestRender();
+}
+window.addEventListener('resize', resize);
+
+let renderRequested = false;
+function requestRender() {
+  if (renderRequested) return;
+  renderRequested = true;
+  requestAnimationFrame(render);
+}
+function render() {
+  renderRequested = false;
+  controls.update();
+  if (useBloom) composer.render();
+  else renderer.render(scene, camera);
+}
+
+// --- Hexagon wireframe floor -------------------------------------------
+function buildHexGrid(radius, hexSize, color) {
+  const positions = [];
+  const corner = (cx, cz, i) => {
+    const a = Math.PI / 180 * (60 * i - 30);
+    return [cx + hexSize * Math.cos(a), cz + hexSize * Math.sin(a)];
+  };
+  const horizSpacing = Math.sqrt(3) * hexSize;
+  const vertSpacing = 1.5 * hexSize;
+  const rows = Math.ceil(radius / vertSpacing) + 1;
+  const cols = Math.ceil(radius / horizSpacing) + 1;
+  for (let row = -rows; row <= rows; row++) {
+    const cz = row * vertSpacing;
+    const xOffset = (row % 2 !== 0) ? horizSpacing / 2 : 0;
+    for (let col = -cols; col <= cols; col++) {
+      const cx = col * horizSpacing + xOffset;
+      if (Math.sqrt(cx * cx + cz * cz) > radius) continue;
+      for (let i = 0; i < 6; i++) {
+        const [x1, z1] = corner(cx, cz, i);
+        const [x2, z2] = corner(cx, cz, i + 1);
+        positions.push(x1, 0, z1, x2, 0, z2);
+      }
+    }
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  const mat = new THREE.LineBasicMaterial({ color, transparent: true, opacity: 0.4, depthWrite: false });
+  return new THREE.LineSegments(geo, mat);
+}
+
+// --- SuS logo backdrop ---------------------------------------------------
+function buildLogoBackdrop(worldHeight, onReady) {
+  new THREE.TextureLoader().load('./assets/sus-logo.png', (tex) => {
+    tex.colorSpace = THREE.SRGBColorSpace;
+    tex.anisotropy = renderer.capabilities.getMaxAnisotropy();
+    tex.minFilter = THREE.LinearMipmapLinearFilter;
+    tex.magFilter = THREE.LinearFilter;
+    const aspect = tex.image.width / tex.image.height;
+    const geo = new THREE.PlaneGeometry(worldHeight * aspect, worldHeight);
+    const mat = new THREE.MeshBasicMaterial({ map: tex, transparent: true, opacity: 0.11, side: THREE.DoubleSide, depthWrite: false });
+    onReady(new THREE.Mesh(geo, mat));
+  });
+}
+
+const partsByFile = {};
+const root = new THREE.Group();
+scene.add(root);
+
+let hexGridRef = null;
+let logoMeshRef = null;
+
+const loader = new FBXLoader();
+loader.manager.onError = (url) => console.warn('Missing resource (expected — dangling refs in source FBX):', url);
+
+let loadedCount = 0;
+const total = CLASSIFICATION.length;
+
+Promise.all(CLASSIFICATION.map(item =>
+  loader.loadAsync(`./Newmesh/${item.dir}/${item.file}`).then(obj => {
+    const style = styleFor(item);
+    const tint = new THREE.Color(style.color);
+    obj.traverse(o => {
+      if (o.isMesh) {
+        const mats = Array.isArray(o.material) ? o.material : [o.material];
+        mats.forEach(m => {
+          m.side = THREE.DoubleSide;
+          m.map = m.normalMap = m.specularMap = m.aoMap = m.bumpMap = m.emissiveMap = null;
+          m.vertexColors = false; // some meshes carry baked vertex colors that would multiply against the tint
+          m.color.copy(tint);
+          m.emissive && m.emissive.set(0x000000);
+          m.specular && m.specular.set(0x161616);
+          m.shininess = 25;
+          m.transparent = true;
+          m.opacity = style.opacity;
+          m.depthWrite = false;
+          m.needsUpdate = true;
+        });
+      }
+    });
+    partsByFile[item.file] = obj;
+    root.add(obj);
+    loadedCount++;
+    const pct = Math.round((loadedCount / total) * 100);
+    statusEl.firstChild.textContent = `Loading parts… ${loadedCount}/${total}`;
+    barFillEl.style.width = pct + '%';
+  }).catch(err => {
+    console.error('Failed to load', item.file, err);
+    loadedCount++;
+  })
+)).then(async () => {
+  // Stand the model up: source rig is authored lying supine with the body's
+  // long axis along Z. Center/scale first, then rotate +90° about X so the
+  // long axis becomes vertical (Y), skull up.
+  const box = new THREE.Box3().setFromObject(root);
+  const size = box.getSize(new THREE.Vector3());
+  const center = box.getCenter(new THREE.Vector3());
+
+  // `root.position.sub(center)` is wrong once scale/rotation are also
+  // applied. Three.js composes a child's world position as
+  // `position + rotate(scale * localPos)` — so for the centroid (localPos =
+  // center) to land on the world origin, position must be
+  // `-rotate(scale * center)`, not the raw `-center`.
+  const maxDim = Math.max(size.x, size.y, size.z);
+  const worldScale = 1.8 / maxDim;
+  root.scale.setScalar(worldScale);
+  root.rotation.x = Math.PI / 2; // (x,y,z) -> (x,-z,y)
+  const rotatedCenter = new THREE.Vector3(center.x, -center.z, center.y).multiplyScalar(worldScale);
+  root.position.copy(rotatedCenter).multiplyScalar(-1);
+  root.updateMatrixWorld(true);
+
+  const box2 = new THREE.Box3().setFromObject(root);
+  const size2 = box2.getSize(new THREE.Vector3());
+  const center2 = box2.getCenter(new THREE.Vector3());
+
+  // Front-facing default view: +Z faces front after the stand-up rotation
+  // (confirmed visually — -Z showed the spine/back).
+  const dist = size2.length() * 0.9;
+  defaultTarget = center2.clone();
+  defaultCamPos = new THREE.Vector3(center2.x, center2.y, center2.z + dist);
+  controls.target.copy(defaultTarget);
+  camera.position.copy(defaultCamPos);
+
+  const floorY = box2.min.y;
+  hexGridRef = buildHexGrid(4, 0.16, 0x3a3d42);
+  hexGridRef.position.set(center2.x, floorY, center2.z);
+  scene.add(hexGridRef);
+
+  buildLogoBackdrop(size2.y * 1.05, (logoMesh) => {
+    logoMesh.position.set(center2.x, floorY + size2.y * 0.6, box2.min.z - 0.5);
+    logoMeshRef = logoMesh;
+    scene.add(logoMesh);
+    requestRender();
+  });
+
+  resize();
+  buildPresets();
+  buildSidebar();
+  statusEl.style.display = 'none';
+  requestRender();
+
+  // Background-prefetch the 30MB Whole Body GLB once the main scene is idle,
+  // so the first click on "Whole Body" later doesn't pay the full download +
+  // parse cost right when the user is waiting on it.
+  const prefetchEcorche = () => ensureEcorcheLoaded().catch(() => {});
+  if ('requestIdleCallback' in window) requestIdleCallback(prefetchEcorche, { timeout: 4000 });
+  else setTimeout(prefetchEcorche, 1500);
+});
+
+function setGroupVisible(key, visible) {
+  itemsForGroup(key).forEach(({ file }) => { const p = partsByFile[file]; if (p) p.visible = visible; });
+  requestRender();
+}
+
+const groupElByKey = {};
+
+function buildSidebar() {
+  groupsEl.innerHTML = '';
+  GROUP_META.forEach(meta => {
+    const items = itemsForGroup(meta.key);
+    if (items.length === 0) return;
+    const el = document.createElement('div');
+    el.className = 'group';
+    groupElByKey[meta.key] = el;
+
+    const head = document.createElement('div');
+    head.className = 'group-head';
+
+    const chevron = document.createElement('span');
+    chevron.className = 'group-chevron';
+    chevron.textContent = '▾';
+
+    const dot = document.createElement('span');
+    dot.className = 'group-dot';
+    dot.style.background = meta.color;
+
+    const cb = document.createElement('input');
+    cb.type = 'checkbox';
+    cb.checked = true;
+    cb.addEventListener('click', (e) => e.stopPropagation());
+    cb.addEventListener('change', () => {
+      setGroupVisible(meta.key, cb.checked);
+      itemChecks.forEach(c => c.checked = cb.checked);
+    });
+
+    const title = document.createElement('span');
+    title.className = 'group-title';
+    title.textContent = meta.title;
+
+    const count = document.createElement('span');
+    count.className = 'group-count';
+    count.textContent = items.length;
+
+    head.appendChild(cb);
+    head.appendChild(dot);
+    head.appendChild(title);
+    head.appendChild(count);
+    head.appendChild(chevron);
+    head.addEventListener('click', () => el.classList.toggle('open'));
+
+    el.appendChild(head);
+
+    const itemChecks = [];
+    const itemsEl = document.createElement('div');
+    itemsEl.className = 'group-items';
+    items.forEach((c, i) => {
+      const row = document.createElement('div');
+      row.className = 'item-row';
+      const icb = document.createElement('input');
+      icb.type = 'checkbox';
+      icb.checked = true;
+      icb.id = 'item_' + meta.key + '_' + i;
+      icb.addEventListener('change', () => {
+        const p = partsByFile[c.file];
+        if (p) p.visible = icb.checked;
+        cb.checked = itemChecks.some(x => x.checked);
+        requestRender();
+      });
+      itemChecks.push(icb);
+      const lbl = document.createElement('label');
+      lbl.htmlFor = icb.id;
+      lbl.title = c.label;
+      lbl.textContent = c.label;
+      row.appendChild(icb);
+      row.appendChild(lbl);
+      itemsEl.appendChild(row);
+    });
+    el.appendChild(itemsEl);
+
+    groupsEl.appendChild(el);
+  });
+}
+
+function buildPresets() {
+  presetsEl.innerHTML = '';
+  PRESETS.forEach(preset => {
+    const card = document.createElement('div');
+    card.className = 'preset-card' + (preset.wide ? ' wide' : '');
+    card.innerHTML = `<span class="preset-icon">${PRESET_ICONS[preset.key]}</span><span class="label">${preset.label}</span>`;
+    card.addEventListener('click', () => applyPreset(preset.key, card));
+    presetsEl.appendChild(card);
+  });
+}
+
+// --- "Whole Body" preset: the separate high-quality écorché model --------
+// The torso-only organ assembly has no limbs/head and no real muscle
+// texture, so it can't approximate a full-body muscular render. This preset
+// instead lazy-loads the existing male_full_body_ecorche.glb (real
+// photographic muscle texture, standing, full limbs) on first use and shows
+// that in place of everything else.
+let ecorcheModel = null, ecorcheLoadPromise = null;
+let ecorcheCamPos = null, ecorcheTarget = null;
+let ecorcheAccessPoints = null;
+let activePresetKey = null;
+
+// Access-point overlay (laparoscopic entry sites + catheterization/pulse
+// sites), shown only on the Whole Body écorché view. Positions are standard
+// adult-proportion estimates — fraction of standing height from the feet (h)
+// and fraction of body half-width from the midline (x, +right/-left as
+// rendered) — rather than exact landmarks on this specific mesh. Each point
+// is placed by raycasting from outside the body toward that approximate
+// spot so it lands exactly on the model's real surface regardless of this
+// particular mesh's proportions.
+const ACCESS_POINTS = [
+  // Laparoscopic entry points (anterior abdomen)
+  { label: 'Umbilicus', group: 'lap', h: 0.60, x: 0, dir: 'front' },
+  { label: 'Lee Huang Point', group: 'lap', h: 0.665, x: -0.05, dir: 'front' },
+  { label: "Palmer's Point", group: 'lap', h: 0.665, x: 0.20, dir: 'front' },
+  { label: 'Jain Point', group: 'lap', h: 0.60, x: 0.18, dir: 'front' },
+  { label: 'ASIS', group: 'lap', h: 0.495, x: 0.26, dir: 'front' },
+  { label: 'ASIS', group: 'lap', h: 0.495, x: -0.26, dir: 'front' },
+  // Catheterization / pulse access points (bilateral unless noted)
+  { label: 'Temporal', group: 'vasc', h: 0.95, x: 0.13, dir: 'front' },
+  { label: 'Temporal', group: 'vasc', h: 0.95, x: -0.13, dir: 'front' },
+  { label: 'Carotid', group: 'vasc', h: 0.885, x: 0.09, dir: 'front' },
+  { label: 'Carotid', group: 'vasc', h: 0.885, x: -0.09, dir: 'front' },
+  { label: 'Apical', group: 'vasc', h: 0.71, x: -0.10, dir: 'front' },
+  { label: 'Brachial', group: 'vasc', h: 0.615, x: 0.17, dir: 'front' },
+  { label: 'Brachial', group: 'vasc', h: 0.615, x: -0.17, dir: 'front' },
+  { label: 'Radial', group: 'vasc', h: 0.465, x: 0.185, dir: 'front' },
+  { label: 'Radial', group: 'vasc', h: 0.465, x: -0.185, dir: 'front' },
+  { label: 'Ulnar', group: 'vasc', h: 0.465, x: 0.205, dir: 'front' },
+  { label: 'Ulnar', group: 'vasc', h: 0.465, x: -0.205, dir: 'front' },
+  { label: 'Femoral', group: 'vasc', h: 0.485, x: 0.10, dir: 'front' },
+  { label: 'Femoral', group: 'vasc', h: 0.485, x: -0.10, dir: 'front' },
+  { label: 'Popliteal', group: 'vasc', h: 0.27, x: 0.11, dir: 'back' },
+  { label: 'Popliteal', group: 'vasc', h: 0.27, x: -0.11, dir: 'back' },
+  { label: 'Dorsalis Pedis', group: 'vasc', h: 0.02, x: 0.10, dir: 'top' },
+  { label: 'Dorsalis Pedis', group: 'vasc', h: 0.02, x: -0.10, dir: 'top' },
+  { label: 'Posterior Tibial', group: 'vasc', h: 0.045, x: 0.08, dir: 'back' },
+  { label: 'Posterior Tibial', group: 'vasc', h: 0.045, x: -0.08, dir: 'back' },
+];
+
+const LAP_COLOR = 0x3d8ee0;  // brighter azure — laparoscopic entry points
+const VASC_COLOR = 0x182f66; // deep indigo — vascular / catheter sites
+
+// Small radial-gradient sprite for the "slightly white glow" around each dot.
+// Rendered at a high resolution with many soft gradient stops (rather than a
+// hard 2-3 stop falloff) so it stays smooth instead of showing banding/pixel
+// edges when scaled up in the scene.
+function makeGlowSprite(radius) {
+  const size = 256;
+  const canvas = document.createElement('canvas');
+  canvas.width = canvas.height = size;
+  const ctx = canvas.getContext('2d');
+  const grad = ctx.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
+  grad.addColorStop(0, 'rgba(255,255,255,0.95)');
+  grad.addColorStop(0.18, 'rgba(255,255,255,0.75)');
+  grad.addColorStop(0.4, 'rgba(255,255,255,0.32)');
+  grad.addColorStop(0.7, 'rgba(255,255,255,0.08)');
+  grad.addColorStop(1, 'rgba(255,255,255,0)');
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, size, size);
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.minFilter = THREE.LinearFilter;
+  tex.magFilter = THREE.LinearFilter;
+  tex.anisotropy = 4;
+  const mat = new THREE.SpriteMaterial({
+    map: tex, transparent: true, opacity: 0.5,
+    depthWrite: false, blending: THREE.AdditiveBlending,
+  });
+  const sprite = new THREE.Sprite(mat);
+  sprite.scale.setScalar(radius);
+  return sprite;
+}
+
+// Builds both marker groups at once (lap + vascular) so they share one
+// raycast pass; returns { lap, vasc, hitboxes } — hitboxes is a flat list of
+// { mesh, label, group } used for hover tooltips (each mesh a bit larger
+// than the visible dot, invisible, so hovering is easy without the visible
+// dot looking oversized).
+function buildAccessPointMarkers(model, box2, size2b, center2b) {
+  const lapGroup = new THREE.Group();
+  const vascGroup = new THREE.Group();
+  lapGroup.visible = false;
+  vascGroup.visible = false;
+  const hitboxes = [];
+  const raycaster = new THREE.Raycaster();
+  const dotRadius = size2b.y * 0.0055;
+  const dotGeo = new THREE.SphereGeometry(dotRadius, 24, 16);
+  const hitGeo = new THREE.SphereGeometry(dotRadius * 2.2, 10, 8);
+  const lapMat = new THREE.MeshBasicMaterial({ color: LAP_COLOR, transparent: true, opacity: 0.8 });
+  const vascMat = new THREE.MeshBasicMaterial({ color: VASC_COLOR, transparent: true, opacity: 0.8 });
+  const meshes = [];
+  model.traverse(o => { if (o.isMesh) meshes.push(o); });
+  const margin = size2b.length() * 0.6;
+
+  ACCESS_POINTS.forEach(pt => {
+    const targetY = box2.min.y + pt.h * size2b.y;
+    // The estimated lateral offset (pt.x) is a rough guess at this specific
+    // mesh's proportions and sometimes casts past the silhouette entirely
+    // (e.g. a narrow neck/head/ankle) — on a miss, walk the offset inward
+    // toward the centerline in shrinking steps and retry, so the marker
+    // lands on the nearest real surface instead of being dropped.
+    const xFractions = [pt.x, pt.x * 0.75, pt.x * 1.4, pt.x * 0.5, pt.x * 1.8, pt.x * 0.3, pt.x * 0.15, pt.x * 2.4];
+    // Try the requested direction first; if the whole lateral sweep still
+    // misses (e.g. a low back-raycast passing under the heel), fall back to
+    // a front raycast at the same height/offset — the body's front profile
+    // is solid almost everywhere, so this reliably lands somewhere sane
+    // instead of dropping the marker.
+    const dirsToTry = pt.dir === 'front' ? ['front'] : [pt.dir, 'front', 'top'];
+    let hit = null;
+    outer:
+    for (const dir of dirsToTry) {
+      for (const xf of xFractions) {
+        const targetX = center2b.x + xf * size2b.x;
+        const targetZ = center2b.z;
+        let origin, direction;
+        if (dir === 'front') { origin = new THREE.Vector3(targetX, targetY, box2.max.z + margin); direction = new THREE.Vector3(0, 0, -1); }
+        else if (dir === 'back') { origin = new THREE.Vector3(targetX, targetY, box2.min.z - margin); direction = new THREE.Vector3(0, 0, 1); }
+        else { origin = new THREE.Vector3(targetX, box2.max.y + margin, targetZ); direction = new THREE.Vector3(0, -1, 0); }
+        raycaster.set(origin, direction);
+        raycaster.far = margin * 2.2;
+        const hits = raycaster.intersectObjects(meshes, false);
+        if (hits.length) { hit = hits[0]; break outer; }
+      }
+    }
+    if (!hit) { console.warn('Access point missed the model surface:', pt.label); return; }
+    const normal = hit.face.normal.clone().transformDirection(hit.object.matrixWorld).normalize();
+    const surfacePoint = hit.point.clone().addScaledVector(normal, size2b.y * 0.002);
+    const isLap = pt.group === 'lap';
+    const targetGroup = isLap ? lapGroup : vascGroup;
+
+    const dot = new THREE.Mesh(dotGeo, isLap ? lapMat : vascMat);
+    dot.position.copy(surfacePoint);
+    const glow = makeGlowSprite(size2b.y * 0.026);
+    glow.position.copy(surfacePoint).addScaledVector(normal, size2b.y * 0.001);
+    const hitbox = new THREE.Mesh(hitGeo, new THREE.MeshBasicMaterial({ visible: false }));
+    hitbox.position.copy(surfacePoint);
+    targetGroup.add(dot, glow, hitbox);
+    hitboxes.push({ mesh: hitbox, label: pt.label, group: pt.group });
+  });
+
+  return { lap: lapGroup, vasc: vascGroup, hitboxes };
+}
+
+// Two selectable looks for the écorché body. Both start from each
+// material's pristine loaded color/roughness/metalness (stashed in
+// userData the first time) so switching back and forth never compounds.
+const BODY_STYLES = {
+  // Original look: cool, ghostly, heavily see-through.
+  classic: { tint: 0xffb8a8, opacity: 0.15, roughnessAdd: 0.2, metalnessSub: 0.1, emissive: 0x000000, emissiveIntensity: 0, depthWrite: false, bloom: false, rim: false },
+  // "X-ray hologram" look: a dark, desaturated blue-black body (mostly
+  // see-through, like classic) with a soft cyan rim light hugging the
+  // silhouette — not a flat bright wash over the whole surface. The rim is
+  // a separate slightly-inflated backside shell (see buildRimShell) rather
+  // than a real Fresnel shader, so it's cheap and version-safe; combined
+  // with a gentle bloom pass it reads as a soft glow along the edges.
+  glow: { tint: 0x35506e, opacity: 0.22, roughnessAdd: 0.25, metalnessSub: 0.1, emissive: 0x0a1622, emissiveIntensity: 0.3, depthWrite: false, bloom: true, rim: true },
+};
+let ecorcheBodyStyle = 'classic';
+let ecorcheRimShells = null;
+
+// A thin, slightly-inflated, backside-only, additive-blended copy of each
+// mesh, added as a sibling of the original (so it inherits the same parent
+// transform chain rather than guessing a flattened one). Because it's
+// BackSide and only a hair larger than the real surface, it's hidden behind
+// the front faces except right at the silhouette edge — exactly where a rim
+// light would appear — without needing a custom shader.
+function buildRimShell(model) {
+  const shells = [];
+  const rimMat = new THREE.MeshBasicMaterial({
+    color: 0x5fd4ff, transparent: true, opacity: 0.3, side: THREE.BackSide,
+    blending: THREE.AdditiveBlending, depthWrite: false,
+  });
+  model.traverse(o => {
+    if (!o.isMesh) return;
+    const shell = new THREE.Mesh(o.geometry, rimMat);
+    shell.position.copy(o.position);
+    shell.rotation.copy(o.rotation);
+    shell.scale.copy(o.scale).multiplyScalar(1.018);
+    o.parent.add(shell);
+    shells.push(shell);
+  });
+  return shells;
+}
+
+function applyBodyStyle(styleName) {
+  const style = BODY_STYLES[styleName];
+  if (!ecorcheModel || !style) return;
+  const tint = new THREE.Color(style.tint);
+  ecorcheModel.traverse(o => {
+    if (!o.isMesh) return;
+    const mats = Array.isArray(o.material) ? o.material : [o.material];
+    mats.forEach(m => {
+      if (!m.userData.baseColor) {
+        m.userData.baseColor = m.color ? m.color.clone() : new THREE.Color(0xffffff);
+        m.userData.baseRoughness = m.roughness ?? 0.6;
+        m.userData.baseMetalness = m.metalness ?? 0;
+      }
+      if (m.color) m.color.copy(m.userData.baseColor).multiply(tint);
+      if ('roughness' in m) m.roughness = Math.min(1, m.userData.baseRoughness + style.roughnessAdd);
+      if ('metalness' in m) m.metalness = Math.max(0, m.userData.baseMetalness - style.metalnessSub);
+      if (m.emissive) { m.emissive.setHex(style.emissive); m.emissiveIntensity = style.emissiveIntensity; }
+      m.side = THREE.DoubleSide;
+      m.transparent = true;
+      m.opacity = style.opacity;
+      m.depthWrite = style.depthWrite;
+      m.needsUpdate = true;
+    });
+  });
+  if (style.rim) {
+    if (!ecorcheRimShells) ecorcheRimShells = buildRimShell(ecorcheModel);
+    ecorcheRimShells.forEach(s => s.visible = true);
+  } else if (ecorcheRimShells) {
+    ecorcheRimShells.forEach(s => s.visible = false);
+  }
+  ecorcheBodyStyle = styleName;
+  useBloom = !!style.bloom;
+  requestRender();
+}
+
+async function ensureEcorcheLoaded() {
+  if (ecorcheModel) return ecorcheModel;
+  if (ecorcheLoadPromise) return ecorcheLoadPromise;
+  ecorcheLoadPromise = (async () => {
+    statusEl.style.display = '';
+    statusEl.firstChild.textContent = 'Loading full-body view…';
+    barFillEl.style.width = '0%';
+    const gltf = await new GLTFLoader().loadAsync('./male_full_body_ecorche.glb', (xhr) => {
+      if (xhr.lengthComputable) barFillEl.style.width = Math.round(xhr.loaded / xhr.total * 100) + '%';
+    });
+    const obj = gltf.scene;
+
+    const box = new THREE.Box3().setFromObject(obj);
+    const size = box.getSize(new THREE.Vector3());
+    const center = box.getCenter(new THREE.Vector3());
+    const scale = 1.8 / Math.max(size.x, size.y, size.z);
+    obj.scale.setScalar(scale);
+    obj.position.copy(center).multiplyScalar(-scale); // see root-centering note above — position must include scale
+    obj.visible = false;
+    scene.add(obj);
+    ecorcheModel = obj;
+    applyBodyStyle(ecorcheBodyStyle);
+
+    const box2 = new THREE.Box3().setFromObject(obj);
+    const size2b = box2.getSize(new THREE.Vector3());
+    const center2b = box2.getCenter(new THREE.Vector3());
+    const dist = size2b.length() * 0.8;
+    ecorcheTarget = center2b.clone();
+    ecorcheCamPos = new THREE.Vector3(center2b.x, center2b.y + 0.15, center2b.z + dist);
+
+    ecorcheAccessPoints = buildAccessPointMarkers(obj, box2, size2b, center2b);
+    scene.add(ecorcheAccessPoints.lap, ecorcheAccessPoints.vasc);
+
+    statusEl.style.display = 'none';
+    return obj;
+  })();
+  return ecorcheLoadPromise;
+}
+
+async function applyPreset(key, cardEl) {
+  document.querySelectorAll('.preset-card').forEach(c => c.classList.remove('active'));
+  if (cardEl) cardEl.classList.add('active');
+  activePresetKey = key;
+
+  if (key === 'whole') {
+    GROUP_META.forEach(meta => {
+      setGroupVisible(meta.key, false);
+      const groupEl = groupElByKey[meta.key];
+      if (groupEl) {
+        groupEl.querySelector('.group-head input[type="checkbox"]').checked = false;
+        groupEl.querySelectorAll('.item-row input').forEach(icb => icb.checked = false);
+      }
+    });
+    accessPointsBox.hidden = false;
+    bodyStyleRow.hidden = false;
+    const model = await ensureEcorcheLoaded();
+    model.visible = true;
+    useBloom = ecorcheBodyStyle === 'glow';
+    if (ecorcheAccessPoints) {
+      ecorcheAccessPoints.lap.visible = lapToggle.checked;
+      ecorcheAccessPoints.vasc.visible = vascToggle.checked;
+    }
+    topbarH1.textContent = 'Male Full-Body';
+    camera.position.copy(ecorcheCamPos);
+    controls.target.copy(ecorcheTarget);
+    requestRender();
+    return;
+  }
+
+  accessPointsBox.hidden = true;
+  bodyStyleRow.hidden = true;
+  lapToggle.checked = false;
+  vascToggle.checked = false;
+  useBloom = false;
+  if (ecorcheAccessPoints) { ecorcheAccessPoints.lap.visible = false; ecorcheAccessPoints.vasc.visible = false; }
+  apTooltip.style.display = 'none';
+  topbarH1.textContent = 'Abdominothoracic Region';
+  if (ecorcheModel) ecorcheModel.visible = false;
+  const preset = PRESETS.find(p => p.key === key);
+  applyGroupFilter(preset.groups);
+  requestRender();
+}
+
+// Shows exactly the given GROUP_META keys, hides the rest, and keeps the
+// sidebar checkboxes in sync — shared by applyPreset and the "Reset view"
+// button (which applies its own default filter rather than just recentering).
+function applyGroupFilter(keys) {
+  const active = new Set(keys);
+  GROUP_META.forEach(meta => {
+    const visible = active.has(meta.key);
+    setGroupVisible(meta.key, visible);
+    const groupEl = groupElByKey[meta.key];
+    if (groupEl) {
+      const headCb = groupEl.querySelector('.group-head input[type="checkbox"]');
+      headCb.checked = visible;
+      groupEl.querySelectorAll('.item-row input').forEach(icb => icb.checked = visible);
+    }
+  });
+}
+
+document.getElementById('showAll').addEventListener('click', () => {
+  activePresetKey = null;
+  accessPointsBox.hidden = true;
+  bodyStyleRow.hidden = true;
+  lapToggle.checked = false;
+  vascToggle.checked = false;
+  useBloom = false;
+  if (ecorcheAccessPoints) { ecorcheAccessPoints.lap.visible = false; ecorcheAccessPoints.vasc.visible = false; }
+  apTooltip.style.display = 'none';
+  topbarH1.textContent = 'Abdominothoracic Region';
+  if (ecorcheModel) ecorcheModel.visible = false;
+  Object.values(partsByFile).forEach(p => p.visible = true);
+  document.querySelectorAll('#groups input[type="checkbox"]').forEach(cb => cb.checked = true);
+  document.querySelectorAll('.preset-card').forEach(c => c.classList.remove('active'));
+  requestRender();
+});
+lapDot.style.color = '#' + LAP_COLOR.toString(16).padStart(6, '0');
+lapDot.style.background = lapDot.style.color;
+vascDot.style.color = '#' + VASC_COLOR.toString(16).padStart(6, '0');
+vascDot.style.background = vascDot.style.color;
+lapToggle.addEventListener('change', () => {
+  if (ecorcheAccessPoints) ecorcheAccessPoints.lap.visible = lapToggle.checked;
+  requestRender();
+});
+vascToggle.addEventListener('change', () => {
+  if (ecorcheAccessPoints) ecorcheAccessPoints.vasc.visible = vascToggle.checked;
+  requestRender();
+});
+styleClassicBtn.addEventListener('click', () => {
+  applyBodyStyle('classic');
+  styleClassicBtn.classList.add('active');
+  styleGlowBtn.classList.remove('active');
+});
+styleGlowBtn.addEventListener('click', () => {
+  applyBodyStyle('glow');
+  styleGlowBtn.classList.add('active');
+  styleClassicBtn.classList.remove('active');
+});
+
+// --- Access-point hover tooltips -----------------------------------------
+const apRaycaster = new THREE.Raycaster();
+const apMouseNdc = new THREE.Vector2();
+renderer.domElement.addEventListener('pointermove', (ev) => {
+  if (!ecorcheAccessPoints || activePresetKey !== 'whole') return;
+  const visibleHitboxes = ecorcheAccessPoints.hitboxes.filter(h =>
+    (h.group === 'lap' ? ecorcheAccessPoints.lap.visible : ecorcheAccessPoints.vasc.visible));
+  if (!visibleHitboxes.length) { apTooltip.style.display = 'none'; return; }
+  const rect = renderer.domElement.getBoundingClientRect();
+  apMouseNdc.x = ((ev.clientX - rect.left) / rect.width) * 2 - 1;
+  apMouseNdc.y = -((ev.clientY - rect.top) / rect.height) * 2 + 1;
+  apRaycaster.setFromCamera(apMouseNdc, camera);
+  const hits = apRaycaster.intersectObjects(visibleHitboxes.map(h => h.mesh), false);
+  if (hits.length) {
+    const found = visibleHitboxes.find(h => h.mesh === hits[0].object);
+    apTooltip.textContent = found.label;
+    apTooltip.style.left = (ev.clientX - rect.left) + 'px';
+    apTooltip.style.top = (ev.clientY - rect.top) + 'px';
+    apTooltip.style.display = 'block';
+  } else {
+    apTooltip.style.display = 'none';
+  }
+});
+renderer.domElement.addEventListener('pointerleave', () => { apTooltip.style.display = 'none'; });
+document.getElementById('resetView').addEventListener('click', () => {
+  // "Reset view" doubles as "back to the default view": Heart + Vasculature
+  // + Organs visible, everything else (including the Whole Body écorché)
+  // hidden, camera back to the default framing.
+  activePresetKey = null;
+  document.querySelectorAll('.preset-card').forEach(c => c.classList.remove('active'));
+  accessPointsBox.hidden = true;
+  bodyStyleRow.hidden = true;
+  lapToggle.checked = false;
+  vascToggle.checked = false;
+  useBloom = false;
+  if (ecorcheAccessPoints) { ecorcheAccessPoints.lap.visible = false; ecorcheAccessPoints.vasc.visible = false; }
+  apTooltip.style.display = 'none';
+  if (ecorcheModel) ecorcheModel.visible = false;
+  topbarH1.textContent = 'Abdominothoracic Region';
+  applyGroupFilter(['heart', 'vasculature', 'organs']);
+  camera.position.copy(defaultCamPos);
+  controls.target.copy(defaultTarget);
+  requestRender();
+});
+
+let whiteBg = false;
+const bgToggleBtn = document.getElementById('bgToggle');
+bgToggleBtn.addEventListener('click', () => {
+  whiteBg = !whiteBg;
+  scene.background = new THREE.Color(whiteBg ? 0xf4f4f4 : 0x141414);
+  if (hexGridRef) hexGridRef.visible = !whiteBg;
+  if (logoMeshRef) logoMeshRef.visible = !whiteBg;
+  bgToggleBtn.textContent = whiteBg ? 'Dark background' : 'White background';
+  bgToggleBtn.classList.toggle('active', whiteBg);
+  topbarEl.classList.toggle('on-white', whiteBg);
+  hintEl.classList.toggle('on-white', whiteBg);
+  requestRender();
+});
+</script>
+</body>
+</html>
