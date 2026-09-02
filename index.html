@@ -734,8 +734,10 @@ const ACCESS_POINTS = [
   { label: 'ASIS', group: 'lap', h: 0.495, x: 0.26, dir: 'front' },
   { label: 'ASIS', group: 'lap', h: 0.495, x: -0.26, dir: 'front' },
   // Catheterization / pulse access points (bilateral unless noted)
-  { label: 'Temporal', group: 'vasc', h: 0.95, x: 0.13, dir: 'front' },
-  { label: 'Temporal', group: 'vasc', h: 0.95, x: -0.13, dir: 'front' },
+  // Temporal pulse is at the temple, just anterior to the ear tragus —
+  // roughly forehead/eye height, not up near the crown.
+  { label: 'Temporal', group: 'vasc', h: 0.905, x: 0.13, dir: 'front' },
+  { label: 'Temporal', group: 'vasc', h: 0.905, x: -0.13, dir: 'front' },
   { label: 'Carotid', group: 'vasc', h: 0.885, x: 0.09, dir: 'front' },
   { label: 'Carotid', group: 'vasc', h: 0.885, x: -0.09, dir: 'front' },
   { label: 'Apical', group: 'vasc', h: 0.71, x: -0.10, dir: 'front' },
