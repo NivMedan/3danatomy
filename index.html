@@ -739,12 +739,18 @@ const ACCESS_POINTS = [
   { label: 'Carotid', group: 'vasc', h: 0.885, x: 0.09, dir: 'front' },
   { label: 'Carotid', group: 'vasc', h: 0.885, x: -0.09, dir: 'front' },
   { label: 'Apical', group: 'vasc', h: 0.71, x: -0.10, dir: 'front' },
-  { label: 'Brachial', group: 'vasc', h: 0.615, x: 0.17, dir: 'front' },
-  { label: 'Brachial', group: 'vasc', h: 0.615, x: -0.17, dir: 'front' },
-  { label: 'Radial', group: 'vasc', h: 0.465, x: 0.185, dir: 'front' },
-  { label: 'Radial', group: 'vasc', h: 0.465, x: -0.185, dir: 'front' },
-  { label: 'Ulnar', group: 'vasc', h: 0.465, x: 0.205, dir: 'front' },
-  { label: 'Ulnar', group: 'vasc', h: 0.465, x: -0.205, dir: 'front' },
+  // Brachial/Radial/Ulnar assume arms hanging at the sides (h/x below), which
+  // doesn't hold for the Obese model — that asset has no skeleton, so its
+  // arms are permanently in an outstretched T-pose. obeseH/obeseX give these
+  // three pairs an alternate placement (arm horizontal at shoulder height,
+  // varying by distance along the arm instead of by height) used only when
+  // building access points against the Obese model.
+  { label: 'Brachial', group: 'vasc', h: 0.615, x: 0.17, dir: 'front', obeseH: 0.82, obeseX: 0.30 },
+  { label: 'Brachial', group: 'vasc', h: 0.615, x: -0.17, dir: 'front', obeseH: 0.82, obeseX: -0.30 },
+  { label: 'Radial', group: 'vasc', h: 0.465, x: 0.185, dir: 'front', obeseH: 0.815, obeseX: 0.46 },
+  { label: 'Radial', group: 'vasc', h: 0.465, x: -0.185, dir: 'front', obeseH: 0.815, obeseX: -0.46 },
+  { label: 'Ulnar', group: 'vasc', h: 0.465, x: 0.205, dir: 'front', obeseH: 0.825, obeseX: 0.46 },
+  { label: 'Ulnar', group: 'vasc', h: 0.465, x: -0.205, dir: 'front', obeseH: 0.825, obeseX: -0.46 },
   { label: 'Femoral', group: 'vasc', h: 0.485, x: 0.10, dir: 'front' },
   { label: 'Femoral', group: 'vasc', h: 0.485, x: -0.10, dir: 'front' },
   { label: 'Popliteal', group: 'vasc', h: 0.27, x: 0.11, dir: 'back' },
@@ -805,7 +811,7 @@ function makeGlowSprite(radius) {
 // { mesh, label, group } used for hover tooltips (each mesh a bit larger
 // than the visible dot, invisible, so hovering is easy without the visible
 // dot looking oversized).
-function buildAccessPointMarkers(model, box2, size2b, center2b) {
+function buildAccessPointMarkers(model, box2, size2b, center2b, variant) {
   const lapGroup = new THREE.Group();
   const vascGroup = new THREE.Group();
   const robotGroup = new THREE.Group();
@@ -827,13 +833,19 @@ function buildAccessPointMarkers(model, box2, size2b, center2b) {
   const margin = size2b.length() * 0.6;
 
   ACCESS_POINTS.forEach(pt => {
-    const targetY = box2.min.y + pt.h * size2b.y;
-    // The estimated lateral offset (pt.x) is a rough guess at this specific
+    // The Obese model has no skeleton and is permanently in a T-pose, so
+    // arm points placed for a hanging arm (the Standard model's pose) land
+    // in the wrong place — a few entries carry an obeseH/obeseX override for
+    // this case.
+    const h = (variant === 'obese' && pt.obeseH !== undefined) ? pt.obeseH : pt.h;
+    const x = (variant === 'obese' && pt.obeseX !== undefined) ? pt.obeseX : pt.x;
+    const targetY = box2.min.y + h * size2b.y;
+    // The estimated lateral offset (x) is a rough guess at this specific
     // mesh's proportions and sometimes casts past the silhouette entirely
     // (e.g. a narrow neck/head/ankle) — on a miss, walk the offset inward
     // toward the centerline in shrinking steps and retry, so the marker
     // lands on the nearest real surface instead of being dropped.
-    const xFractions = [pt.x, pt.x * 0.75, pt.x * 1.4, pt.x * 0.5, pt.x * 1.8, pt.x * 0.3, pt.x * 0.15, pt.x * 2.4];
+    const xFractions = [x, x * 0.75, x * 1.4, x * 0.5, x * 1.8, x * 0.3, x * 0.15, x * 2.4];
     // Try the requested direction first; if the whole lateral sweep still
     // misses (e.g. a low back-raycast passing under the heel), fall back to
     // a front raycast at the same height/offset — the body's front profile
@@ -953,198 +965,59 @@ function applyBodyStyle(styleName) {
   requestRender();
 }
 
-// One round of Laplacian smoothing: every vertex moves partway toward the
-// average position of the vertices it shares a triangle edge with. Cheap
-// (built once, lazily, only for the Obese variant) and version-safe, unlike
-// trying to detect/suppress specific "muscle ridge" geometry.
-function smoothGeometry(geo, iterations, strength) {
-  const pos = geo.attributes.position;
-  const index = geo.getIndex();
-  if (!index) return;
-  const n = pos.count;
-  const idx = index.array;
-  const sumX = new Float32Array(n), sumY = new Float32Array(n), sumZ = new Float32Array(n);
-  const count = new Int32Array(n);
-  for (let iter = 0; iter < iterations; iter++) {
-    sumX.fill(0); sumY.fill(0); sumZ.fill(0); count.fill(0);
-    for (let t = 0; t < idx.length; t += 3) {
-      const a = idx[t], b = idx[t + 1], c = idx[t + 2];
-      accum(a, b); accum(b, a); accum(b, c); accum(c, b); accum(c, a); accum(a, c);
-    }
-    for (let i = 0; i < n; i++) {
-      if (!count[i]) continue;
-      const x = pos.getX(i), y = pos.getY(i), z = pos.getZ(i);
-      const ax = sumX[i] / count[i], ay = sumY[i] / count[i], az = sumZ[i] / count[i];
-      pos.setXYZ(i, x + (ax - x) * strength, y + (ay - y) * strength, z + (az - z) * strength);
-    }
-  }
-  pos.needsUpdate = true;
-  function accum(from, to) {
-    sumX[from] += pos.getX(to); sumY[from] += pos.getY(to); sumZ[from] += pos.getZ(to);
-    count[from]++;
-  }
-}
+// --- "Obese" body type: a separate sculpted asset -------------------------
+// (Newmesh/obese.glb), loaded and centered/scaled the same way as the
+// standard écorché model so it stands in exactly the same spot. A first
+// procedural (deform-the-standard-mesh) approach was replaced with this
+// real model per feedback — the stretched muscle texture and geometric
+// bulge-from-a-toned-body approach didn't read as genuine fat.
+let ecorcheObeseLoadPromise = null;
 
-// --- "Obese" body type: a procedurally-deformed clone of the standard ----
-// écorché mesh. There's no separate sculpted asset for this, so each mesh's
-// geometry is cloned, its world-space transform baked in directly (so the
-// clone can live in its own flat group with no parenting to work out), and
-// then two deformations are layered: a broad RADIAL SCALE centered around
-// the hips (covering roughly chest to mid-thigh) that thickens whatever is
-// already offset from the central axis at that height — torso, but also
-// arms and legs, since they too sit away from center — and a second,
-// tighter absolute push at waist height for a defined belly on top of that.
-// An earlier version only did the belly push in isolation, which left the
-// limbs looking untouched/thin next to a suddenly bloated torso.
-function buildObeseVariant(baseModel) {
-  const group = new THREE.Group();
-  const worldBox = new THREE.Box3().setFromObject(baseModel);
-  const worldSize = worldBox.getSize(new THREE.Vector3());
-  const worldCenter = worldBox.getCenter(new THREE.Vector3());
-
-  const bodyCenterY = worldBox.min.y + worldSize.y * 0.50;
-  const bodyFalloff = worldSize.y * 0.35;
-  const bodyMaxScale = 0.35; // up to +35% radial thickness at peak, torso only (see coreWeight below)
-
-  const bellyY = worldBox.min.y + worldSize.y * 0.58;
-  const bellyFalloff = worldSize.y * 0.09;
-  const bellyPush = worldSize.y * 0.09;
-
-  // A height-varying scale looks right for the torso (it should taper into
-  // a round belly) but is wrong for limbs: scaling a straight arm by a
-  // factor that changes along its length bows it, since the "how far out"
-  // amount then varies with height instead of staying constant — a straight
-  // line under a *constant* scale stays straight, but under a *varying*
-  // one doesn't. So vertices far enough from the central axis to be a limb
-  // rather than torso get a flat, height-independent thickening instead.
-  const torsoRadius = worldSize.y * 0.12;
-  const torsoTransition = worldSize.y * 0.035;
-  const limbBoost = 0.34; // uniform limb thickness (arms, legs, hands), no height dependence
-
-  // A second, lower bulge for full hips/glutes/upper-thigh, on top of the
-  // general torso taper and the belly.
-  const hipY = worldBox.min.y + worldSize.y * 0.47;
-  const hipFalloff = worldSize.y * 0.08;
-  const hipPush = worldSize.y * 0.075;
-
-  const v = new THREE.Vector3();
-
-  baseModel.traverse(o => {
-    if (!o.isMesh) return;
-    o.updateMatrixWorld(true);
-    const geo = o.geometry.clone();
-    const mirrored = o.matrixWorld.determinant() < 0;
-    geo.applyMatrix4(o.matrixWorld);
-    if (mirrored) {
-      // A negative-determinant world transform (a mirrored rig part) flips
-      // winding order; three.js normally compensates for that at render
-      // time based on the object's own matrix, but that compensation goes
-      // away once the transform is baked into the geometry and the mesh
-      // gets an identity transform instead. Left uncorrected, the freshly
-      // computed vertex normals end up pointing inward and the mesh renders
-      // as an unlit black silhouette. Reversing each triangle's winding
-      // here restores correct outward-facing normals.
-      const index = geo.getIndex();
-      if (index) {
-        const arr = index.array;
-        for (let i = 0; i < arr.length; i += 3) { const t = arr[i]; arr[i] = arr[i + 2]; arr[i + 2] = t; }
-        index.needsUpdate = true;
-      }
-    }
-    const pos = geo.attributes.position;
-    for (let i = 0; i < pos.count; i++) {
-      v.fromBufferAttribute(pos, i);
-      const dxBody = v.x - worldCenter.x, dzBody = v.z - worldCenter.z;
-      const radialDist = Math.sqrt(dxBody * dxBody + dzBody * dzBody);
-      const coreWeight = THREE.MathUtils.clamp(1 - (radialDist - torsoRadius) / torsoTransition, 0, 1);
-      const dyBody = v.y - bodyCenterY;
-      const bodyWeight = Math.exp(-(dyBody * dyBody) / (2 * bodyFalloff * bodyFalloff));
-      const scale = 1 + bodyMaxScale * bodyWeight * coreWeight + limbBoost * (1 - coreWeight);
-      let nx = worldCenter.x + dxBody * scale;
-      let nz = worldCenter.z + dzBody * scale;
-
-      const dyBelly = v.y - bellyY;
-      const bellyWeight = Math.exp(-(dyBelly * dyBelly) / (2 * bellyFalloff * bellyFalloff));
-      if (bellyWeight > 0.002) {
-        const ndx = nx - worldCenter.x, ndz = nz - worldCenter.z;
-        const radial = Math.sqrt(ndx * ndx + ndz * ndz) || 0.0001;
-        const push = bellyPush * bellyWeight;
-        nx += (ndx / radial) * push;
-        nz += (ndz / radial) * push;
-      }
-
-      const dyHip = v.y - hipY;
-      const hipWeight = Math.exp(-(dyHip * dyHip) / (2 * hipFalloff * hipFalloff));
-      if (hipWeight > 0.002) {
-        const ndx = nx - worldCenter.x, ndz = nz - worldCenter.z;
-        const radial = Math.sqrt(ndx * ndx + ndz * ndz) || 0.0001;
-        const push = hipPush * hipWeight;
-        nx += (ndx / radial) * push;
-        nz += (ndz / radial) * push;
-      }
-      pos.setXYZ(i, nx, v.y, nz);
-    }
-    pos.needsUpdate = true;
-    // A few rounds of light Laplacian smoothing (each vertex nudged toward
-    // the average of its direct neighbors) — the underlying écorché mesh
-    // sculpts muscle/tendon definition (abs, forearm tendons) directly into
-    // the geometry, not just the texture, so nulling the map alone left
-    // those ridges intact; scaling the whole limb up by a constant factor
-    // then exaggerated them further (a ridge sits further from the central
-    // axis than the "valleys" beside it, so it gets pushed out more).
-    // Smoothing preferentially washes out that small-scale relief while a
-    // handful of light passes leaves the large-scale belly/hip bulges
-    // (which are broad, low-frequency shapes) essentially intact.
-    smoothGeometry(geo, 8, 0.6);
-    geo.computeVertexNormals();
-    const srcMats = Array.isArray(o.material) ? o.material : [o.material];
-    const mats = srcMats.map(m => {
-      const clone = m.clone();
-      // Material.clone()/copy() round-trips userData through
-      // JSON.parse(JSON.stringify(...)), and THREE.Color defines toJSON()
-      // as getHex() — so the Color instance stashed in userData.baseColor
-      // silently turns into a plain hex integer on the clone. Left as-is,
-      // applyBodyStyle's `m.color.copy(m.userData.baseColor)` reads
-      // .r/.g/.b off a number (all undefined), producing an NaN color and
-      // an unlit black mesh. Restore the real Color instance directly from
-      // the untouched source material instead of trusting the clone.
-      if (m.userData.baseColor) {
-        clone.userData.baseColor = m.userData.baseColor.clone();
-        clone.userData.baseRoughness = m.userData.baseRoughness;
-        clone.userData.baseMetalness = m.userData.baseMetalness;
-      }
-      // Drop the baked photographic muscle texture (definition, striations)
-      // — stretched over a bulged belly it reads as a six-pack painted onto
-      // a balloon rather than actual fat. A flat shaded surface (just the
-      // tinted base color) looks like soft tissue instead.
-      clone.map = clone.normalMap = clone.roughnessMap = clone.metalnessMap = clone.aoMap = clone.bumpMap = null;
-      clone.needsUpdate = true;
-      return clone;
-    });
-    group.add(new THREE.Mesh(geo, mats.length > 1 ? mats : mats[0]));
-  });
-  group.visible = false;
-  return group;
-}
-
-function ensureObeseVariant() {
+async function ensureObeseVariant() {
   if (ecorcheObeseModel) return ecorcheObeseModel;
-  ecorcheObeseModel = buildObeseVariant(ecorcheModel);
-  scene.add(ecorcheObeseModel);
-  const box2 = new THREE.Box3().setFromObject(ecorcheObeseModel);
-  const size2b = box2.getSize(new THREE.Vector3());
-  const center2b = box2.getCenter(new THREE.Vector3());
-  ecorcheObeseAccessPoints = buildAccessPointMarkers(ecorcheObeseModel, box2, size2b, center2b);
-  scene.add(ecorcheObeseAccessPoints.lap, ecorcheObeseAccessPoints.vasc, ecorcheObeseAccessPoints.robot);
-  return ecorcheObeseModel;
+  if (ecorcheObeseLoadPromise) return ecorcheObeseLoadPromise;
+  ecorcheObeseLoadPromise = (async () => {
+    statusEl.style.display = '';
+    statusEl.firstChild.textContent = 'Loading obese body type…';
+    barFillEl.style.width = '0%';
+    const gltf = await new GLTFLoader().loadAsync('./Newmesh/obese.glb', (xhr) => {
+      if (xhr.lengthComputable) barFillEl.style.width = Math.round(xhr.loaded / xhr.total * 100) + '%';
+    });
+    const obj = gltf.scene;
+
+    // Same centering/scaling recipe as ensureEcorcheLoaded, so this stands
+    // in the same place at the same overall height as the standard model.
+    const box = new THREE.Box3().setFromObject(obj);
+    const size = box.getSize(new THREE.Vector3());
+    const center = box.getCenter(new THREE.Vector3());
+    const scale = 1.8 / Math.max(size.x, size.y, size.z);
+    obj.scale.setScalar(scale);
+    obj.position.copy(center).multiplyScalar(-scale);
+    obj.visible = false;
+    scene.add(obj);
+    ecorcheObeseModel = obj;
+
+    const box2 = new THREE.Box3().setFromObject(obj);
+    const size2b = box2.getSize(new THREE.Vector3());
+    const center2b = box2.getCenter(new THREE.Vector3());
+    ecorcheObeseAccessPoints = buildAccessPointMarkers(obj, box2, size2b, center2b, 'obese');
+    scene.add(ecorcheObeseAccessPoints.lap, ecorcheObeseAccessPoints.vasc, ecorcheObeseAccessPoints.robot);
+
+    statusEl.style.display = 'none';
+    return obj;
+  })();
+  return ecorcheObeseLoadPromise;
 }
 
 // Shared by the Standard/Obese buttons and by applyPreset('whole') (so
 // re-entering Whole Body restores whichever body type was last picked).
-function applyBodyType(type) {
+async function applyBodyType(type) {
   bodyType = type;
   const showObese = type === 'obese';
-  if (showObese) ensureObeseVariant();
+  if (showObese) await ensureObeseVariant();
+  // If the user picked a different body type while obese.glb was still
+  // loading, don't clobber their newer choice once it resolves.
+  if (bodyType !== type) return;
   if (ecorcheModel) ecorcheModel.visible = !showObese;
   if (ecorcheObeseModel) ecorcheObeseModel.visible = showObese;
   activeEcorcheGroup = showObese ? ecorcheObeseModel : ecorcheModel;
@@ -1235,7 +1108,7 @@ async function applyPreset(key, cardEl) {
     // without this guard the écorché model (now opaque in Classic) would pop
     // back in on top of whatever the user picked, visually burying it.
     if (activePresetKey !== 'whole') return;
-    applyBodyType(bodyType); // restores whichever body type (Standard/Obese) was last picked
+    await applyBodyType(bodyType); // restores whichever body type (Standard/Obese) was last picked
     topbarH1.textContent = 'Male Full-Body';
     camera.position.copy(ecorcheCamPos);
     controls.target.copy(ecorcheTarget);
