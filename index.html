@@ -130,6 +130,20 @@
     padding: 5px 9px; font-size: 12px; color: var(--text); white-space: nowrap; display: none;
   }
 
+  #calibratePanel {
+    position: absolute; right: 12px; bottom: 12px; z-index: 12; width: 300px; max-width: calc(100% - 24px);
+    background: rgba(18,18,20,0.96); border: 1px solid var(--border-soft); border-radius: var(--radius-sm);
+    padding: 10px; font-size: 12px; color: var(--text);
+  }
+  #calibratePanel[hidden] { display: none; }
+  #calibratePanel .cal-header { display: flex; align-items: center; justify-content: space-between; font-weight: 600; margin-bottom: 4px; }
+  #calibratePanel .cal-header button { background: none; border: none; color: var(--text-dim); cursor: pointer; font-size: 14px; padding: 0 4px; }
+  #calibratePanel .cal-hint { color: var(--text-dim); margin-bottom: 6px; line-height: 1.4; }
+  #calOutput { width: 100%; height: 110px; resize: vertical; background: var(--panel-2); color: var(--text); border: 1px solid var(--border); border-radius: var(--radius-sm); font-family: monospace; font-size: 11px; padding: 6px; box-sizing: border-box; }
+  #calibratePanel .cal-actions { display: flex; gap: 6px; margin-top: 6px; }
+  #calibratePanel .cal-actions button { flex: 1; font-size: 12px; padding: 6px; border-radius: var(--radius-sm); border: 1px solid var(--border); background: var(--panel-3); color: var(--text); cursor: pointer; }
+  #calibrateBtn.active { background: var(--accent-selected); border-color: var(--accent); color: var(--text); }
+
   #status { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); font-size: 13px; color: var(--text-dim); text-align: center; width: 280px; }
   #status .bar { height: 4px; background: var(--panel-2); border-radius: 2px; margin-top: 10px; overflow: hidden; }
   #status .bar-fill { height: 100%; background: var(--accent); width: 0%; transition: width 0.15s; }
@@ -162,6 +176,15 @@
     <div id="hint">Drag to rotate · Scroll to zoom · Right-drag to pan</div>
     <div id="status">Loading parts…<div class="bar"><div class="bar-fill" id="bar-fill"></div></div></div>
     <div id="apTooltip"></div>
+    <div id="calibratePanel" hidden>
+      <div class="cal-header"><span>Point calibration</span><button id="calClose">✕</button></div>
+      <div class="cal-hint">Click a spot on the model (don't drag) to drop a marker there and get its exact coordinates. Type a label when prompted.</div>
+      <textarea id="calOutput" readonly placeholder="Picked points will appear here as ready-to-paste code…"></textarea>
+      <div class="cal-actions">
+        <button id="calCopy">Copy all</button>
+        <button id="calClear">Clear markers</button>
+      </div>
+    </div>
   </div>
   <div id="sidebar">
     <div id="sidebar-header">
@@ -175,6 +198,7 @@
       <button id="showAll">Show all</button>
       <button id="resetView">Reset view</button>
       <button id="bgToggle">White background</button>
+      <button id="calibrateBtn" title="Click points on the model to get exact h/x coordinates">📍 Calibrate points</button>
     </div>
     <div id="bodyStyleRow" hidden>
       <span class="lbl">Body appearance</span>
@@ -264,6 +288,12 @@ const bodyTypeRow = document.getElementById('bodyTypeRow');
 const typeStandardBtn = document.getElementById('typeStandard');
 const typeObeseBtn = document.getElementById('typeObese');
 const apTooltip = document.getElementById('apTooltip');
+const calibrateBtn = document.getElementById('calibrateBtn');
+const calibratePanel = document.getElementById('calibratePanel');
+const calOutput = document.getElementById('calOutput');
+const calCopyBtn = document.getElementById('calCopy');
+const calClearBtn = document.getElementById('calClear');
+const calCloseBtn = document.getElementById('calClose');
 
 const GROUP_META = [
   { key: 'skeleton',   title: 'Skeleton',   color: '#e8dcc0' },
@@ -291,6 +321,7 @@ const CLASSIFICATION = [
   { group: 'muscles', label: 'Transversus Abdominis Muscle', file: 'Transversus_Abdominis_Muscle.fbx', dir: 'Abdominal' },
 
   { group: 'heart', label: 'Heart Inner', file: 'Heart_Inner.fbx', dir: 'Abdominal' },
+  { group: 'heart', label: 'Heart Outer', file: 'Heart_Outer.fbx', dir: 'Abdominal' },
   { group: 'heart', label: 'Aorta Heart', file: 'Aorta_Heart.fbx', dir: 'Abdominal' },
   { group: 'heart', label: 'IVC Heart', file: 'IVC_Heart.fbx', dir: 'Abdominal' },
   { group: 'heart', label: 'Pericardium', file: 'Pericardium.fbx', dir: 'Abdominal' },
@@ -317,9 +348,11 @@ const CLASSIFICATION = [
   { group: 'organs', subtype: 'solid', label: 'Kidney Cortex Left', file: 'Kidney_Cortex_Left.fbx', dir: 'Abdominal' },
   { group: 'organs', subtype: 'solid', label: 'Kidney Cortex Right', file: 'Kidney_Cortex_Right.fbx', dir: 'Abdominal' },
   { group: 'organs', subtype: 'solid', label: 'Liver', file: 'Liver.fbx', dir: 'Abdominal' },
+  { group: 'organs', subtype: 'solid', label: 'Gallbladder', file: 'Gallbladder.fbx', dir: 'Abdominal' },
   { group: 'organs', subtype: 'solid', label: 'Pancreas', file: 'Pancreas.fbx', dir: 'Abdominal' },
   { group: 'organs', subtype: 'solid', label: 'Prostate', file: 'Prostate.fbx', dir: 'Abdominal' },
   { group: 'organs', subtype: 'solid', label: 'Spleen', file: 'Spleen.fbx', dir: 'Abdominal' },
+  { group: 'organs', subtype: 'solid', label: 'Bladder', file: 'Bladder.FBX', dir: 'FAST' },
   { group: 'organs', subtype: 'gi', label: 'Appendix', file: 'Appendix.FBX', dir: 'Abdominal' },
   { group: 'organs', subtype: 'gi', label: 'Colon', file: 'Colon.fbx', dir: 'Abdominal' },
   { group: 'organs', subtype: 'gi', label: 'SmallIntestine', file: 'SmallIntestine.fbx', dir: 'Abdominal' },
@@ -1230,6 +1263,91 @@ renderer.domElement.addEventListener('pointermove', (ev) => {
   }
 });
 renderer.domElement.addEventListener('pointerleave', () => { apTooltip.style.display = 'none'; });
+
+// --- Point calibration tool ------------------------------------------------
+// Lets a human click directly on the model to get the exact (h, x) coordinates
+// used by ACCESS_POINTS, instead of guessing positions from screenshots.
+let calibrateMode = false;
+const calRaycaster = new THREE.Raycaster();
+const calMouseNdc = new THREE.Vector2();
+const calMarkers = [];
+let calDownPos = null;
+let calDownTime = 0;
+
+calibrateBtn.addEventListener('click', () => {
+  calibrateMode = !calibrateMode;
+  calibrateBtn.classList.toggle('active', calibrateMode);
+  calibratePanel.hidden = !calibrateMode;
+});
+calCloseBtn.addEventListener('click', () => calibrateBtn.click());
+
+renderer.domElement.addEventListener('pointerdown', (ev) => {
+  if (!calibrateMode) return;
+  calDownPos = { x: ev.clientX, y: ev.clientY };
+  calDownTime = performance.now();
+});
+
+renderer.domElement.addEventListener('pointerup', (ev) => {
+  if (!calibrateMode || !calDownPos) return;
+  const dx = ev.clientX - calDownPos.x;
+  const dy = ev.clientY - calDownPos.y;
+  const moved = Math.sqrt(dx * dx + dy * dy);
+  const elapsed = performance.now() - calDownTime;
+  calDownPos = null;
+  if (moved > 6 || elapsed > 600) return; // this was a drag/rotate, not a click
+
+  if (!activeEcorcheGroup) return;
+  const rect = renderer.domElement.getBoundingClientRect();
+  calMouseNdc.x = ((ev.clientX - rect.left) / rect.width) * 2 - 1;
+  calMouseNdc.y = -((ev.clientY - rect.top) / rect.height) * 2 + 1;
+  calRaycaster.setFromCamera(calMouseNdc, camera);
+  const hits = calRaycaster.intersectObject(activeEcorcheGroup, true);
+  if (!hits.length) return;
+  const point = hits[0].point;
+
+  const box = new THREE.Box3().setFromObject(activeEcorcheGroup);
+  const size = box.getSize(new THREE.Vector3());
+  const center = box.getCenter(new THREE.Vector3());
+  const h = (point.y - box.min.y) / size.y;
+  const x = (point.x - center.x) / size.x;
+
+  const label = prompt('Label for this point? (e.g. "Radial Artery (Wrist)")', '');
+  if (label === null) return;
+
+  const markerGeo = new THREE.SphereGeometry(Math.max(size.length() * 0.006, 0.004), 12, 12);
+  const markerMat = new THREE.MeshBasicMaterial({ color: 0xffe600, depthTest: false });
+  const marker = new THREE.Mesh(markerGeo, markerMat);
+  marker.position.copy(point);
+  marker.renderOrder = 999;
+  marker.userData.isCalMarker = true;
+  scene.add(marker);
+  calMarkers.push(marker);
+
+  const hxField = bodyType === 'obese' ? 'obeseH' : 'h';
+  const xField = bodyType === 'obese' ? 'obeseX' : 'x';
+  const line = `{ label: '${label || 'Unnamed point'}', group: 'vasc', ${hxField}: ${h.toFixed(3)}, ${xField}: ${x.toFixed(3)}, dir: 'front' }, // ${bodyType}`;
+  calOutput.value += (calOutput.value ? '\n' : '') + line;
+  calOutput.scrollTop = calOutput.scrollHeight;
+  requestRender();
+});
+
+calCopyBtn.addEventListener('click', async () => {
+  try {
+    await navigator.clipboard.writeText(calOutput.value);
+  } catch (e) {
+    calOutput.select();
+    document.execCommand('copy');
+  }
+  calCopyBtn.textContent = 'Copied!';
+  setTimeout(() => { calCopyBtn.textContent = 'Copy all'; }, 1200);
+});
+calClearBtn.addEventListener('click', () => {
+  calOutput.value = '';
+  calMarkers.forEach(m => scene.remove(m));
+  calMarkers.length = 0;
+  requestRender();
+});
+
 document.getElementById('resetView').addEventListener('click', () => {
   // "Reset view" doubles as "back to the default view": Heart + Vasculature
   // + Organs visible, everything else (including the Whole Body écorché)
