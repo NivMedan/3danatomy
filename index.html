@@ -137,7 +137,7 @@
   /* Responsive: stack the 3D view above a scrollable sidebar instead of a
      fixed side-by-side layout once there isn't room for both comfortably. */
   @media (max-width: 860px) {
-    html, body { overflow: auto; }
+    html, body { overflow-y: auto; overflow-x: hidden; }
     #app { flex-direction: column; height: auto; min-height: 100%; }
     #viewport { flex: 0 0 58vh; min-height: 320px; }
     #sidebar { width: 100%; flex: 1 1 auto; border-left: none; border-top: 1px solid var(--border); max-height: none; }
@@ -441,6 +441,14 @@ function resize() {
   requestRender();
 }
 window.addEventListener('resize', resize);
+// A plain window "resize" listener misses cases where #viewport changes size
+// without the window itself firing a resize event — e.g. the mobile layout
+// swapping #app to a stacked column at the 860px breakpoint, a tablet
+// orientation change, or an embedding context (iframe/panel) resizing the
+// page without dispatching one. ResizeObserver watches the actual element
+// the canvas needs to match, so the 3D view can't get stuck at a stale size
+// while the surrounding layout (sidebar included) has already moved on.
+new ResizeObserver(resize).observe(viewport);
 
 let renderRequested = false;
 function requestRender() {
