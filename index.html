@@ -774,31 +774,18 @@ const ACCESS_POINTS = [
   { label: 'Jain Point', group: 'lap', h: 0.60, x: 0.18, dir: 'front' },
   { label: 'ASIS', group: 'lap', h: 0.495, x: 0.26, dir: 'front' },
   { label: 'ASIS', group: 'lap', h: 0.495, x: -0.26, dir: 'front' },
-  // Vascular access points — pared down to the specific curated set of real
-  // catheter/line access sites requested (not a general pulse-point chart):
-  // Radial, Femoral, and Brachial arteries, Ulnar artery, and Jugular/Femoral
-  // veins. Brachial/Radial/Ulnar assume arms hanging at the sides (h/x
-  // below), which doesn't hold for the Obese model — that asset has no
-  // skeleton, so its arms are permanently in an outstretched T-pose.
-  // obeseH/obeseX give these pairs an alternate placement (arm horizontal at
-  // shoulder height, varying by distance along the arm instead of by
-  // height) used only when building access points against the Obese model.
-  // Brachial sits in the lower upper arm, just proximal to (above) the
-  // antecubital fossa/elbow crease — not in the crease itself.
-  { label: 'Brachial Artery (Arm)', group: 'vasc', h: 0.645, x: 0.15, dir: 'front', obeseH: 0.82, obeseX: 0.24 },
-  { label: 'Brachial Artery (Arm)', group: 'vasc', h: 0.645, x: -0.15, dir: 'front', obeseH: 0.82, obeseX: -0.24 },
-  { label: 'Radial Artery (Wrist)', group: 'vasc', h: 0.465, x: 0.185, dir: 'front', obeseH: 0.815, obeseX: 0.46 },
-  { label: 'Radial Artery (Wrist)', group: 'vasc', h: 0.465, x: -0.185, dir: 'front', obeseH: 0.815, obeseX: -0.46 },
-  { label: 'Ulnar Artery (Wrist/Forearm)', group: 'vasc', h: 0.465, x: 0.205, dir: 'front', obeseH: 0.825, obeseX: 0.46 },
-  { label: 'Ulnar Artery (Wrist/Forearm)', group: 'vasc', h: 0.465, x: -0.205, dir: 'front', obeseH: 0.825, obeseX: -0.46 },
-  { label: 'Femoral Artery (Groin)', group: 'vasc', h: 0.485, x: 0.10, dir: 'front' },
-  { label: 'Femoral Artery (Groin)', group: 'vasc', h: 0.485, x: -0.10, dir: 'front' },
-  // Femoral vein sits medial to the femoral artery in the femoral sheath.
-  { label: 'Femoral Vein (Leg)', group: 'vasc', h: 0.485, x: 0.055, dir: 'front' },
-  { label: 'Femoral Vein (Leg)', group: 'vasc', h: 0.485, x: -0.055, dir: 'front' },
-  // Internal jugular vein runs alongside the carotid artery in the neck.
-  { label: 'Jugular Vein (Neck)', group: 'vasc', h: 0.885, x: 0.08, dir: 'front' },
-  { label: 'Jugular Vein (Neck)', group: 'vasc', h: 0.885, x: -0.08, dir: 'front' },
+  // Vascular access points — positions picked directly on the model surface
+  // via the in-app "Calibrate points" tool (click-to-raycast), not estimated
+  // from screenshots. h/x calibrated against Standard; obeseH/obeseX
+  // calibrated separately against the Obese model (its different proportions
+  // and T-pose arms mean the two don't share coordinates).
+  { label: 'Arterial Line', group: 'vasc', h: 0.496, x: -0.460, dir: 'front' },
+  { label: 'PICC', group: 'vasc', h: 0.652, x: -0.367, dir: 'front', obeseH: 0.777, obeseX: -0.238 },
+  { label: 'Midline', group: 'vasc', h: 0.682, x: 0.314, dir: 'front', obeseH: 0.775, obeseX: 0.232 },
+  { label: 'Peripheral IV', group: 'vasc', h: 0.599, x: 0.379, dir: 'front', obeseH: 0.776, obeseX: 0.337 },
+  { label: 'Large Bore Femoral', group: 'vasc', h: 0.464, x: 0.069, dir: 'front', obeseH: 0.502, obeseX: 0.069 },
+  { label: 'Small Bore Mid Thigh Femoral', group: 'vasc', h: 0.427, x: 0.068, dir: 'front', obeseH: 0.429, obeseX: 0.038 },
+  { label: 'Small Bore Axillary', group: 'vasc', h: 0.823, x: -0.126, dir: 'front', obeseH: 0.818, obeseX: -0.060 },
   // Robotic surgery port template — placed directly against a screenshot of
   // this model with the real 5 port positions marked, then relabeled per
   // explicit correction: top row is Camera (center) + Assistant (both
