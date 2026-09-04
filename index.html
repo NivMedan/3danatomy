@@ -42,6 +42,11 @@
   #sidebar {
     width: 340px; flex-shrink: 0; background: var(--panel); border-left: 1px solid var(--border);
     display: flex; flex-direction: column; height: 100%;
+    /* The whole sidebar scrolls as one region (touch or wheel) instead of
+       nesting a second independent scrollbar inside #groups below — that
+       inner scrollbox kept shrinking to an unusably small sliver as more
+       toggle rows were added above it. */
+    overflow-y: auto; overflow-x: hidden; -webkit-overflow-scrolling: touch;
   }
   #sidebar-header { padding: var(--size-xs) var(--size-xs) var(--size-xxs); border-bottom: 1px solid var(--border); }
   #sidebar-header h2 { margin: 0 0 4px; font-size: 16px; font-weight: 600; color: var(--text); }
@@ -65,7 +70,7 @@
   .preset-card .label { font-size: 12px; font-weight: 500; }
   .preset-card.wide { grid-column: 1 / -1; flex-direction: row; justify-content: center; gap: 10px; padding: 10px 8px; }
 
-  #groups { flex: 1; overflow-y: auto; padding: var(--size-xxs) var(--size-xxs) 20px; }
+  #groups { padding: var(--size-xxs) var(--size-xxs) 20px; }
 
   .group { margin-bottom: 10px; border-radius: var(--radius-lg); overflow: hidden; border: 1px solid var(--border); background: transparent; }
   .group-head {
@@ -142,7 +147,6 @@
     #app { flex-direction: column; height: auto; min-height: 100%; }
     #viewport { flex: 0 0 58vh; min-height: 320px; }
     #sidebar { width: 100%; flex: 1 1 auto; border-left: none; border-top: 1px solid var(--border); max-height: none; }
-    #groups { max-height: 46vh; }
     #status { width: 88vw; max-width: 280px; }
   }
   @media (max-width: 520px) {
@@ -1255,29 +1259,14 @@ renderer.domElement.addEventListener('pointerleave', () => { apTooltip.style.dis
 
 
 document.getElementById('resetView').addEventListener('click', () => {
-  // "Reset view" doubles as "back to the default view": Heart + Vasculature
-  // + Organs visible, everything else (including the Whole Body écorché)
-  // hidden, camera back to the default framing.
-  activePresetKey = null;
-  document.querySelectorAll('.preset-card').forEach(c => c.classList.remove('active'));
-  accessPointsBox.hidden = true;
-  bodyStyleRow.hidden = true;
-  bodyTypeRow.hidden = true;
-  lapToggle.checked = false;
-  vascToggle.checked = false;
-  robotToggle.checked = false;
-  useBloom = false;
-  if (ecorcheAccessPoints) { ecorcheAccessPoints.lap.visible = false; ecorcheAccessPoints.vasc.visible = false; ecorcheAccessPoints.robot.visible = false; }
-  if (ecorcheObeseAccessPoints) { ecorcheObeseAccessPoints.lap.visible = false; ecorcheObeseAccessPoints.vasc.visible = false; ecorcheObeseAccessPoints.robot.visible = false; }
-  apTooltip.style.display = 'none';
-  if (ecorcheModel) ecorcheModel.visible = false;
-  if (ecorcheObeseModel) ecorcheObeseModel.visible = false;
-  topbarH1.textContent = 'Abdominothoracic Region';
-  applyGroupFilter(['heart', 'vasculature', 'organs']);
-  camera.position.copy(defaultCamPos);
-  controls.target.copy(defaultTarget);
-  syncZoomTarget();
-  // Back to the standard dark background too, in case white background was on.
+  // "Reset view" restores the same default landing state as a fresh page
+  // load: Whole Body, Classic style, Standard body type, dark background.
+  ecorcheBodyStyle = 'classic';
+  styleClassicBtn.classList.add('active');
+  styleGlowBtn.classList.remove('active');
+  bodyType = 'standard';
+  typeStandardBtn.classList.add('active');
+  typeObeseBtn.classList.remove('active');
   whiteBg = false;
   scene.background = new THREE.Color(0x141414);
   if (hexGridRef) hexGridRef.visible = true;
@@ -1286,7 +1275,8 @@ document.getElementById('resetView').addEventListener('click', () => {
   bgToggleBtn.classList.remove('active');
   topbarEl.classList.remove('on-white');
   hintEl.classList.remove('on-white');
-  requestRender();
+  const wholeCard = presetsEl.querySelector('[data-key="whole"]');
+  applyPreset('whole', wholeCard);
 });
 
 let whiteBg = false;
