@@ -19,6 +19,11 @@
     --font-body: 'Inter', -apple-system, "Segoe UI", system-ui, sans-serif;
   }
   * { box-sizing: border-box; }
+  /* Without this, native form-control chrome (a <select>'s open dropdown
+     list, in particular) renders in the browser/OS's default light theme
+     regardless of this page's own dark styling — every open of the
+     procedure/variant dropdowns flashed a bright white popup list. */
+  html { color-scheme: dark; }
   html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text); font-family: var(--font-body); overflow: hidden; }
   #app { display: flex; height: 100%; }
   #viewport { position: relative; flex: 1; }
@@ -103,6 +108,18 @@
 
   #accessPointsBox { margin: var(--size-xxs) var(--size-xs) 0; }
   #accessPointsBox[hidden] { display: none; }
+
+  #procedureBox { margin: var(--size-xs) var(--size-xs) 0; padding-top: var(--size-xxs); border-top: 1px solid var(--border-soft); }
+  #procedureBox[hidden] { display: none; }
+  #procedureSelects { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; }
+  #procedureSelects select {
+    width: 100%; padding: 8px 10px; border-radius: var(--radius-md); border: 1px solid var(--border-soft);
+    background: var(--panel-2); color: var(--text); font-size: 12px; font-family: var(--font-body);
+  }
+  #procedureSelects select:disabled { opacity: 0.5; }
+  #procedureLegend { display: flex; gap: 12px; margin-top: 8px; font-size: 11px; color: var(--text-dim); }
+  #procedureLegend i { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 4px; vertical-align: middle; border: 1px solid rgba(255,255,255,0.4); box-sizing: border-box; }
+  #procedureNote { margin-top: 6px; font-size: 11px; color: var(--text-dim); line-height: 1.4; min-height: 1em; }
   .ap-row {
     display: flex; align-items: center; gap: 8px; margin-top: 6px;
     padding: 10px var(--size-xxs); border: 1px solid var(--border-soft); border-radius: var(--radius-md);
@@ -134,6 +151,7 @@
     background: rgba(20,20,20,0.92); border: 1px solid var(--border-soft); border-radius: var(--radius-sm);
     padding: 5px 9px; font-size: 12px; color: var(--text); white-space: nowrap; display: none;
   }
+
 
 
   #status { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); font-size: 13px; color: var(--text-dim); text-align: center; width: 280px; }
@@ -206,15 +224,6 @@
         <span>Laparoscopic access points</span>
       </label>
       <label class="ap-row">
-        <input type="checkbox" id="vascToggle" />
-        <svg class="ap-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M3 18.5c3-1 3-4 6-4s3 3.2 6 2.7 2.7-3.7 5.5-4.4"/>
-          <circle cx="19.3" cy="6" r="1.6"/><path d="M19.3 7.6c0 2.6-1.8 3.6-1.8 3.6"/>
-        </svg>
-        <span class="ap-dot" id="vascDot"></span>
-        <span>Vascular access points</span>
-      </label>
-      <label class="ap-row">
         <input type="checkbox" id="robotToggle" />
         <svg class="ap-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
           <circle cx="4.5" cy="19" r="1.7"/><line x1="5.8" y1="17.8" x2="11" y2="12.3"/>
@@ -224,6 +233,23 @@
         <span class="ap-dot" id="robotDot"></span>
         <span>Robotic Surgery Access</span>
       </label>
+    </div>
+    <div id="procedureBox" hidden>
+      <div class="section-label">Procedure Access Points</div>
+      <div id="procedureSelects">
+        <select id="procedureSelect">
+          <option value="">Select a procedure…</option>
+        </select>
+        <select id="procedureVariantSelect" disabled>
+          <option value="">Select a variant…</option>
+        </select>
+      </div>
+      <div id="procedureLegend">
+        <span><i style="background:#d32f2f"></i>Camera</span>
+        <span><i style="background:#1a1a1a"></i>Surgeon</span>
+        <span><i style="background:#1e88e5"></i>Assistant</span>
+      </div>
+      <div id="procedureNote"></div>
     </div>
     <div id="groups"></div>
   </div>
@@ -259,11 +285,13 @@ const topbarEl = document.getElementById('topbar');
 const topbarH1 = topbarEl.querySelector('h1');
 const hintEl = document.getElementById('hint');
 const accessPointsBox = document.getElementById('accessPointsBox');
+const procedureBox = document.getElementById('procedureBox');
+const procedureSelect = document.getElementById('procedureSelect');
+const procedureVariantSelect = document.getElementById('procedureVariantSelect');
+const procedureNote = document.getElementById('procedureNote');
 const lapToggle = document.getElementById('lapToggle');
-const vascToggle = document.getElementById('vascToggle');
 const robotToggle = document.getElementById('robotToggle');
 const lapDot = document.getElementById('lapDot');
-const vascDot = document.getElementById('vascDot');
 const robotDot = document.getElementById('robotDot');
 const bodyStyleRow = document.getElementById('bodyStyleRow');
 const styleClassicBtn = document.getElementById('styleClassic');
@@ -666,6 +694,7 @@ ensureGroupLoaded('skeleton').then(async () => {
   resize();
   buildPresets();
   buildSidebar();
+  buildProcedureSelects();
   statusEl.style.display = 'none';
   requestRender();
 
@@ -776,6 +805,51 @@ function buildPresets() {
   });
 }
 
+// Populates the procedure/variant dropdowns from PROCEDURES and wires up
+// selection to show/hide the matching marker set.
+function buildProcedureSelects() {
+  PROCEDURES.forEach(proc => {
+    const opt = document.createElement('option');
+    opt.value = proc.key;
+    opt.textContent = proc.label;
+    procedureSelect.appendChild(opt);
+  });
+
+  function selectVariant(variant) {
+    clearProcedureMarkers();
+    procedureNote.textContent = variant ? (variant.note || '') : '';
+    if (variant) showProcedureVariant(variant.points);
+  }
+
+  procedureSelect.addEventListener('change', () => {
+    procedureVariantSelect.innerHTML = '<option value="">Select a variant…</option>';
+    const proc = PROCEDURES.find(p => p.key === procedureSelect.value);
+    if (!proc) {
+      procedureVariantSelect.disabled = true;
+      selectVariant(null);
+      return;
+    }
+    proc.variants.forEach(v => {
+      const opt = document.createElement('option');
+      opt.value = v.key;
+      opt.textContent = v.label;
+      procedureVariantSelect.appendChild(opt);
+    });
+    procedureVariantSelect.disabled = false;
+    // Default to the first variant instead of requiring an extra click —
+    // every procedure has at least one, so there's always a sane default.
+    procedureVariantSelect.value = proc.variants[0].key;
+    selectVariant(proc.variants[0]);
+  });
+
+  procedureVariantSelect.addEventListener('change', () => {
+    const proc = PROCEDURES.find(p => p.key === procedureSelect.value);
+    const variant = proc && proc.variants.find(v => v.key === procedureVariantSelect.value);
+    selectVariant(variant);
+  });
+}
+
+
 // --- "Whole Body" preset: the separate high-quality écorché model --------
 // The torso-only organ assembly has no limbs/head and no real muscle
 // texture, so it can't approximate a full-body muscular render. This preset
@@ -812,21 +886,6 @@ const ACCESS_POINTS = [
   { label: 'Jain Point', group: 'lap', h: 0.60, x: 0.18, dir: 'front' },
   { label: 'ASIS', group: 'lap', h: 0.495, x: 0.26, dir: 'front' },
   { label: 'ASIS', group: 'lap', h: 0.495, x: -0.26, dir: 'front' },
-  // Vascular access points — positions picked directly on the model surface
-  // via the in-app "Calibrate points" tool (click-to-raycast), not estimated
-  // from screenshots. h/x calibrated against Standard; obeseH/obeseX
-  // calibrated separately against the Obese model (its different proportions
-  // and T-pose arms mean the two don't share coordinates).
-  { label: 'Radial', group: 'vasc', h: 0.496, x: -0.460, dir: 'front', obeseH: 0.791, obeseX: -0.380 },
-  { label: 'Peripheral IV', group: 'vasc', h: 0.599, x: 0.379, dir: 'front', obeseH: 0.776, obeseX: 0.337 },
-  // Mirrored pair — same calibrated position, reflected to the opposite side.
-  // Anterior-view convention: patient's right is shown on the viewer's left.
-  { label: 'Left Femoral Artery', group: 'vasc', h: 0.464, x: 0.069, dir: 'front', obeseH: 0.502, obeseX: 0.069 },
-  { label: 'Right Femoral Artery', group: 'vasc', h: 0.464, x: -0.069, dir: 'front', obeseH: 0.502, obeseX: -0.069 },
-  { label: 'Subclavian Artery', group: 'vasc', h: 0.823, x: -0.126, dir: 'front', obeseH: 0.818, obeseX: -0.060 },
-  // Estimated (not yet picked with the calibration tool) — pedal pulse, top
-  // of the foot near the ankle. Verify/adjust with a calibration click.
-  { label: 'Pedal', group: 'vasc', h: 0.045, x: -0.16, dir: 'front', obeseH: 0.045, obeseX: -0.09 },
   // Robotic surgery port template — placed directly against a screenshot of
   // this model with the real 5 port positions marked, then relabeled per
   // explicit correction: top row is Camera (center) + Assistant (both
@@ -843,6 +902,172 @@ const ACCESS_POINTS = [
 const LAP_COLOR = 0x3d8ee0;   // brighter azure — laparoscopic entry points
 const VASC_COLOR = 0x182f66;  // deep indigo — vascular / catheter sites
 const ROBOT_COLOR = 0x9d5fd6; // violet — robotic surgery ports
+
+// Per-procedure trocar configurations, extracted from "LAP consolidated
+// Concept 7 - Trocar configuration analysis.pptx" (slides 7-27) and manually
+// calibrated against the 3D model. Role colors per the deck's own legend:
+// red = camera, black = surgeon (L/R), blue = assistant. Nissen #2/#3 are
+// still first-pass placeholders (not yet calibrated), and a few individual
+// points don't have an Obese-specific position yet — both fall back to the
+// Standard-model h/x until recalibrated.
+const ROLE_COLOR = { camera: 0xd32f2f, surgeon: 0x1a1a1a, assistant: 0x1e88e5 };
+const PROCEDURES = [
+  { key: 'appendectomy', label: 'Appendectomy', variants: [
+    { key: 'app1', label: '#1', note: 'Camera position 5', points: [
+      { role: 'camera', label: 'Camera', h: 0.591, x: 0, obeseH: 0.595, obeseX: 0.006 },
+      { role: 'surgeon', label: 'Surgeon 1', h: 0.556, x: 0.09, obeseH: 0.554, obeseX: 0.054 },
+      { role: 'surgeon', label: 'Surgeon 2', h: 0.512, x: 0.005 },
+    ] },
+    { key: 'app2', label: '#2', note: 'Standard (central) position, patient shift', points: [
+      { role: 'camera', label: 'Camera', h: 0.6, x: 0, obeseH: 0.588, obeseX: 0.008 },
+      { role: 'surgeon', label: 'Surgeon 1', h: 0.602, x: -0.179, obeseH: 0.602, obeseX: -0.079 },
+      { role: 'surgeon', label: 'Surgeon 2', h: 0.508, x: 0.003, obeseH: 0.519, obeseX: 0.001 },
+    ] },
+    { key: 'app3', label: '#3', note: 'Standard position, patient shift', points: [
+      { role: 'camera', label: 'Camera', h: 0.587, x: -0.001, obeseH: 0.595, obeseX: 0.004 },
+      { role: 'surgeon', label: 'Surgeon 1', h: 0.533, x: -0.143, obeseH: 0.533, obeseX: -0.067 },
+      { role: 'surgeon', label: 'Surgeon 2', h: 0.518, x: 0.107, obeseH: 0.533, obeseX: 0.061 },
+    ] },
+    { key: 'app4', label: '#4', note: 'Standard position of tools', points: [
+      { role: 'surgeon', label: 'Surgeon 1', h: 0.58, x: -0.001, obeseH: 0.592, obeseX: 0 },
+      { role: 'camera', label: 'Camera', h: 0.537, x: 0.113, obeseH: 0.54, obeseX: 0.064 },
+      { role: 'surgeon', label: 'Surgeon 2', h: 0.509, x: -0.004, obeseH: 0.518, obeseX: 0 },
+    ] },
+  ] },
+  { key: 'hysterectomy', label: 'Hysterectomy & Cuff Closure & GYN', variants: [
+    { key: 'standard', label: 'Standard', note: 'Camera position #6 — shared by all 3 procedures', points: [
+      { role: 'camera', label: 'Camera', h: 0.577, x: 0.007, obeseH: 0.59, obeseX: 0.004 },
+      { role: 'surgeon', label: 'Surgeon 1', h: 0.527, x: -0.112, obeseH: 0.535, obeseX: -0.049 },
+      { role: 'surgeon', label: 'Surgeon 2', h: 0.525, x: 0.106, obeseH: 0.539, obeseX: 0.059 },
+      { role: 'assistant', label: 'Assistant', h: 0.509, x: 0.001, obeseH: 0.51, obeseX: 0.007 },
+    ] },
+  ] },
+  { key: 'nephrectomy', label: 'Nephrectomy', variants: [
+    { key: 'standard', label: 'Standard', note: 'Standard position of tools and camera', points: [
+      { role: 'camera', label: 'Camera', h: 0.592, x: -0.006 },
+      { role: 'surgeon', label: 'Surgeon 1', h: 0.652, x: 0.091, obeseH: 0.657, obeseX: 0.073 },
+      { role: 'assistant', label: 'Assistant', h: 0.628, x: 0.163, obeseH: 0.607, obeseX: 0.105 },
+      { role: 'surgeon', label: 'Surgeon 2', h: 0.555, x: 0.09, obeseH: 0.553, obeseX: 0.081 },
+    ] },
+  ] },
+  { key: 'sigmoidectomy', label: 'Sigmoidectomy', variants: [
+    { key: 'sig1', label: '#1', note: 'Standard position, camera in 2nd position', points: [
+      { role: 'camera', label: 'Camera', h: 0.609, x: -0.002, obeseH: 0.612, obeseX: 0.003 },
+      { role: 'surgeon', label: 'Surgeon 1', h: 0.631, x: -0.135 },
+      { role: 'surgeon', label: 'Surgeon 2', h: 0.564, x: -0.128, obeseH: 0.554, obeseX: -0.063 },
+      { role: 'assistant', label: 'Assistant', h: 0.51, x: -0.004, obeseH: 0.513, obeseX: 0.001 },
+    ] },
+    { key: 'sig2', label: '#2', note: 'Standard camera position (or #1) — needs confirmation per notes', points: [
+      { role: 'camera', label: 'Camera', h: 0.606, x: 0.002, obeseH: 0.601, obeseX: 0.007 },
+      { role: 'surgeon', label: 'Surgeon 1', h: 0.616, x: 0.15, obeseH: 0.618, obeseX: 0.086 },
+      { role: 'surgeon', label: 'Surgeon 2', h: 0.543, x: 0.128, obeseH: 0.539, obeseX: 0.053 },
+      { role: 'assistant', label: 'Assistant', h: 0.521, x: 0, obeseH: 0.526, obeseX: 0.003 },
+    ] },
+    { key: 'sig3', label: '#3', note: 'Camera position #1', points: [
+      { role: 'camera', label: 'Camera', h: 0.602, x: 0.009, obeseH: 0.605, obeseX: 0.006 },
+      { role: 'assistant', label: 'Assistant', h: 0.636, x: 0.168, obeseH: 0.648, obeseX: 0.074 },
+      { role: 'surgeon', label: 'Surgeon 1', h: 0.538, x: -0.106, obeseH: 0.535, obeseX: -0.046 },
+      { role: 'surgeon', label: 'Surgeon 2', h: 0.536, x: 0.1, obeseH: 0.532, obeseX: 0.053 },
+    ] },
+    { key: 'sig3grasper', label: '#3 + 2 grasper', note: 'Camera position #1, patient head on the other side', points: [
+      { role: 'camera', label: 'Camera', h: 0.605, x: 0.004, obeseH: 0.607, obeseX: 0.005 },
+      { role: 'assistant', label: 'Assistant 1', h: 0.642, x: -0.168, obeseH: 0.646, obeseX: -0.064 },
+      { role: 'assistant', label: 'Assistant 2', h: 0.64, x: 0.172, obeseH: 0.644, obeseX: 0.076 },
+      { role: 'surgeon', label: 'Surgeon 1', h: 0.528, x: -0.107, obeseH: 0.542, obeseX: -0.053 },
+      { role: 'surgeon', label: 'Surgeon 2', h: 0.528, x: 0.106, obeseH: 0.538, obeseX: 0.058 },
+    ] },
+  ] },
+  { key: 'lobectomy', label: 'Lobectomy', variants: [
+    // Thoracic (lateral chest, arm raised) diagram — a different view than
+    // the rest of this set.
+    { key: 'standard', label: 'Standard', note: 'Camera position #1 — thoracic view', points: [
+      { role: 'camera', label: 'Camera (CAM)', h: 0.599, x: -0.095, obeseH: 0.588, obeseX: -0.06 },
+      { role: 'surgeon', label: 'Utility incision (U.I.)', h: 0.626, x: -0.187 },
+    ] },
+  ] },
+  { key: 'lapchole', label: 'Lap Chole', variants: [
+    { key: 'lc12', label: '#1 & #2', note: 'Standard position (note: "EU – between the legs" — device position, not a port)', points: [
+      { role: 'camera', label: 'Camera', h: 0.582, x: -0.008, obeseH: 0.588, obeseX: 0 },
+      { role: 'assistant', label: 'Assistant', h: 0.683, x: 0, obeseH: 0.672, obeseX: 0.002 },
+      { role: 'surgeon', label: 'Surgeon 1', h: 0.645, x: 0, obeseH: 0.632, obeseX: -0.001 },
+      { role: 'surgeon', label: 'Surgeon 2', h: 0.604, x: -0.159, obeseH: 0.603, obeseX: -0.091 },
+    ] },
+  ] },
+  { key: 'inguinalhernia', label: 'Inguinal Hernia', variants: [
+    { key: 'ih1', label: '#1', note: '3rd camera position', points: [
+      { role: 'camera', label: 'Camera', h: 0.588, x: 0.002, obeseH: 0.582, obeseX: 0 },
+      { role: 'surgeon', label: 'Surgeon 1', h: 0.557, x: 0.004, obeseH: 0.545, obeseX: -0.002 },
+      { role: 'surgeon', label: 'Surgeon 2', h: 0.523, x: 0.001, obeseH: 0.515, obeseX: -0.003 },
+    ] },
+    { key: 'ih2', label: '#2', note: 'Central position', points: [
+      { role: 'camera', label: 'Camera', h: 0.578, x: -0.012, obeseH: 0.579, obeseX: 0.003 },
+      { role: 'surgeon', label: 'Surgeon 1', h: 0.553, x: -0.089, obeseH: 0.55, obeseX: -0.06 },
+      { role: 'surgeon', label: 'Surgeon 2', h: 0.551, x: 0.069, obeseH: 0.548, obeseX: 0.044 },
+    ] },
+    { key: 'ih3', label: '#3', note: 'Central position (not a great fit — no alternative)', points: [
+      { role: 'camera', label: 'Camera', h: 0.574, x: 0.004, obeseH: 0.582, obeseX: 0.004 },
+      { role: 'surgeon', label: 'Surgeon 1', h: 0.592, x: -0.079, obeseH: 0.59, obeseX: -0.053 },
+      { role: 'surgeon', label: 'Surgeon 2', h: 0.548, x: 0.088, obeseH: 0.558, obeseX: 0.054 },
+    ] },
+    { key: 'ih4', label: '#4', note: 'Central position (not a great fit — no alternative)', points: [
+      { role: 'camera', label: 'Camera', h: 0.583, x: -0.003, obeseH: 0.581, obeseX: 0.008 },
+      { role: 'surgeon', label: 'Surgeon 1', h: 0.596, x: 0.091, obeseH: 0.596, obeseX: 0.057 },
+      { role: 'surgeon', label: 'Surgeon 2', h: 0.57, x: -0.094, obeseH: 0.566, obeseX: -0.04 },
+      { role: 'surgeon', label: 'Surgeon 3', h: 0.57, x: -0.094, obeseH: 0.566, obeseX: -0.041 },
+    ] },
+  ] },
+  { key: 'nissen', label: 'Nissen', variants: [
+    { key: 'nissen1', label: '#1', note: 'Central position', points: [
+      { role: 'surgeon', label: 'Surgeon 1', h: 0.607, x: -0.1, obeseH: 0.611, obeseX: -0.046 },
+      { role: 'surgeon', label: 'Surgeon 2', h: 0.604, x: 0.097, obeseH: 0.611, obeseX: 0.061 },
+      { role: 'camera', label: 'Camera', h: 0.576, x: 0.001, obeseH: 0.586, obeseX: 0.009 },
+    ] },
+    { key: 'nissen2', label: '#2', note: '2nd camera position', points: [
+      { role: 'surgeon', label: 'Surgeon 1', h: 0.70, x: -0.10 },
+      { role: 'surgeon', label: 'Surgeon 2', h: 0.70, x: 0.10 },
+      { role: 'assistant', label: 'Assistant 1', h: 0.63, x: -0.22 },
+      { role: 'camera', label: 'Camera', h: 0.63, x: 0 },
+      { role: 'assistant', label: 'Assistant 2', h: 0.63, x: 0.22 },
+    ] },
+    { key: 'nissen3', label: '#3', note: 'Central camera position', points: [
+      { role: 'assistant', label: 'Assistant', h: 0.70, x: -0.18 },
+      { role: 'surgeon', label: 'Surgeon 1', h: 0.70, x: 0.15 },
+      { role: 'surgeon', label: 'Surgeon 2', h: 0.62, x: -0.12 },
+      { role: 'camera', label: 'Camera', h: 0.60, x: 0.03 },
+      { role: 'surgeon', label: 'Surgeon 3', h: 0.62, x: 0.15 },
+    ] },
+  ] },
+  { key: 'gastricbypass', label: 'Gastric Bypass', variants: [
+    { key: 'gb1', label: '#1', note: 'Central camera position', points: [
+      { role: 'assistant', label: 'Assistant 1', h: 0.654, x: -0.077, obeseH: 0.642, obeseX: -0.062 },
+      { role: 'surgeon', label: 'Surgeon 1', h: 0.595, x: -0.087, obeseH: 0.59, obeseX: -0.049 },
+      { role: 'camera', label: 'Camera', h: 0.57, x: 0.009, obeseH: 0.567, obeseX: 0.004 },
+      { role: 'assistant', label: 'Assistant 2', h: 0.654, x: 0.124, obeseH: 0.648, obeseX: 0.071 },
+      { role: 'surgeon', label: 'Surgeon 2', h: 0.594, x: 0.093, obeseH: 0.586, obeseX: 0.06 },
+    ] },
+    { key: 'gb2', label: '#2', note: '3rd camera position, no trocar shift', points: [
+      { role: 'assistant', label: 'Assistant 1', h: 0.663, x: -0.076, obeseH: 0.646, obeseX: 0.085 },
+      { role: 'surgeon', label: 'Surgeon 1', h: 0.57, x: 0.074, obeseH: 0.589, obeseX: 0.061 },
+      { role: 'camera', label: 'Camera', h: 0.585, x: -0.056, obeseH: 0.582, obeseX: -0.02 },
+      { role: 'assistant', label: 'Assistant 2', h: 0.653, x: 0.113, obeseH: 0.648, obeseX: -0.068 },
+      { role: 'surgeon', label: 'Surgeon 2', h: 0.567, x: 0, obeseH: 0.567, obeseX: 0.003 },
+    ] },
+    { key: 'gb3', label: '#3', note: '#4 camera position', points: [
+      { role: 'assistant', label: 'Assistant 1', h: 0.657, x: 0.114, obeseH: 0.666, obeseX: -0.06 },
+      { role: 'surgeon', label: 'Surgeon 1', h: 0.591, x: -0.038, obeseH: 0.566, obeseX: 0.003 },
+      { role: 'camera', label: 'Camera', h: 0.594, x: 0.068, obeseH: 0.587, obeseX: -0.02 },
+      { role: 'assistant', label: 'Assistant 2', h: 0.658, x: -0.098, obeseH: 0.664, obeseX: 0.053 },
+    ] },
+  ] },
+  { key: 'myomectomy', label: 'Myomectomy', variants: [
+    { key: 'standard', label: 'Standard', note: 'Camera position #3 — port shown above the bellybutton', points: [
+      { role: 'camera', label: 'Camera', h: 0.598, x: -0.001, obeseH: 0.6, obeseX: 0.005 },
+      { role: 'surgeon', label: 'Surgeon 1', h: 0.558, x: -0.125, obeseH: 0.554, obeseX: -0.076 },
+      { role: 'surgeon', label: 'Surgeon 2', h: 0.576, x: -0.086, obeseH: 0.577, obeseX: -0.058 },
+      { role: 'assistant', label: 'Assistant', h: 0.542, x: 0.108, obeseH: 0.545, obeseX: 0.06 },
+    ] },
+  ] },
+];
 
 // Small radial-gradient sprite for the "slightly white glow" around each dot.
 // Rendered at a high resolution with many soft gradient stops (rather than a
@@ -872,6 +1097,36 @@ function makeGlowSprite(radius) {
   const sprite = new THREE.Sprite(mat);
   sprite.scale.setScalar(radius);
   return sprite;
+}
+
+// Casts a ray toward an approximate (h, x) position on this specific mesh's
+// surface, sweeping both the lateral offset and (if the requested direction
+// misses entirely) the cast direction, so a rough estimate reliably lands on
+// real geometry instead of being dropped. Shared by the static ACCESS_POINTS
+// build below and the dynamic per-procedure marker builder further down.
+function raycastBodyPoint(meshes, box2, size2b, center2b, h, x, dir, raycaster, margin) {
+  const targetY = box2.min.y + h * size2b.y;
+  const xFractions = [x, x * 0.75, x * 1.4, x * 0.5, x * 1.8, x * 0.3, x * 0.15, x * 2.4];
+  const dirsToTry = dir === 'front' ? ['front'] : [dir, 'front', 'top'];
+  for (const d of dirsToTry) {
+    for (const xf of xFractions) {
+      const targetX = center2b.x + xf * size2b.x;
+      const targetZ = center2b.z;
+      let origin, direction;
+      if (d === 'front') { origin = new THREE.Vector3(targetX, targetY, box2.max.z + margin); direction = new THREE.Vector3(0, 0, -1); }
+      else if (d === 'back') { origin = new THREE.Vector3(targetX, targetY, box2.min.z - margin); direction = new THREE.Vector3(0, 0, 1); }
+      else { origin = new THREE.Vector3(targetX, box2.max.y + margin, targetZ); direction = new THREE.Vector3(0, -1, 0); }
+      raycaster.set(origin, direction);
+      raycaster.far = margin * 2.2;
+      const hits = raycaster.intersectObjects(meshes, false);
+      if (hits.length) {
+        const hit = hits[0];
+        const normal = hit.face.normal.clone().transformDirection(hit.object.matrixWorld).normalize();
+        return { point: hit.point.clone().addScaledVector(normal, size2b.y * 0.002), normal };
+      }
+    }
+  }
+  return null;
 }
 
 // Builds both marker groups at once (lap + vascular) so they share one
@@ -907,38 +1162,10 @@ function buildAccessPointMarkers(model, box2, size2b, center2b, variant) {
     // this case.
     const h = (variant === 'obese' && pt.obeseH !== undefined) ? pt.obeseH : pt.h;
     const x = (variant === 'obese' && pt.obeseX !== undefined) ? pt.obeseX : pt.x;
-    const targetY = box2.min.y + h * size2b.y;
-    // The estimated lateral offset (x) is a rough guess at this specific
-    // mesh's proportions and sometimes casts past the silhouette entirely
-    // (e.g. a narrow neck/head/ankle) — on a miss, walk the offset inward
-    // toward the centerline in shrinking steps and retry, so the marker
-    // lands on the nearest real surface instead of being dropped.
-    const xFractions = [x, x * 0.75, x * 1.4, x * 0.5, x * 1.8, x * 0.3, x * 0.15, x * 2.4];
-    // Try the requested direction first; if the whole lateral sweep still
-    // misses (e.g. a low back-raycast passing under the heel), fall back to
-    // a front raycast at the same height/offset — the body's front profile
-    // is solid almost everywhere, so this reliably lands somewhere sane
-    // instead of dropping the marker.
-    const dirsToTry = pt.dir === 'front' ? ['front'] : [pt.dir, 'front', 'top'];
-    let hit = null;
-    outer:
-    for (const dir of dirsToTry) {
-      for (const xf of xFractions) {
-        const targetX = center2b.x + xf * size2b.x;
-        const targetZ = center2b.z;
-        let origin, direction;
-        if (dir === 'front') { origin = new THREE.Vector3(targetX, targetY, box2.max.z + margin); direction = new THREE.Vector3(0, 0, -1); }
-        else if (dir === 'back') { origin = new THREE.Vector3(targetX, targetY, box2.min.z - margin); direction = new THREE.Vector3(0, 0, 1); }
-        else { origin = new THREE.Vector3(targetX, box2.max.y + margin, targetZ); direction = new THREE.Vector3(0, -1, 0); }
-        raycaster.set(origin, direction);
-        raycaster.far = margin * 2.2;
-        const hits = raycaster.intersectObjects(meshes, false);
-        if (hits.length) { hit = hits[0]; break outer; }
-      }
-    }
+    const hit = raycastBodyPoint(meshes, box2, size2b, center2b, h, x, pt.dir, raycaster, margin);
     if (!hit) { console.warn('Access point missed the model surface:', pt.label); return; }
-    const normal = hit.face.normal.clone().transformDirection(hit.object.matrixWorld).normalize();
-    const surfacePoint = hit.point.clone().addScaledVector(normal, size2b.y * 0.002);
+    const surfacePoint = hit.point;
+    const normal = hit.normal;
     const targetGroup = GROUP_OBJ[pt.group];
 
     const dot = new THREE.Mesh(dotGeo, GROUP_MAT[pt.group]);
@@ -952,6 +1179,57 @@ function buildAccessPointMarkers(model, box2, size2b, center2b, variant) {
   });
 
   return { lap: lapGroup, vasc: vascGroup, robot: robotGroup, hitboxes };
+}
+
+// Dynamic per-procedure marker group. Unlike the static ACCESS_POINTS (built
+// once per body model at load time), a procedure's ports are rebuilt on
+// demand against whichever body (Standard/Obese) is currently active, since
+// only one procedure/variant is shown at a time and switching is rare enough
+// that a fresh raycast pass each time is cheap.
+let activeProcedureGroup = null;
+// Parallel list of { hitbox, dot, glow, pointRef } — the hitboxes exist for
+// the dev-only drag-to-calibrate tool (stripped from production builds) to
+// hit-test against; pointRef is the live PROCEDURES point object so a
+// finished drag can write h/x (or obeseH/obeseX) straight back into it.
+let activeProcedureDots = [];
+function clearProcedureMarkers() {
+  if (activeProcedureGroup) {
+    scene.remove(activeProcedureGroup);
+    activeProcedureGroup = null;
+    activeProcedureDots = [];
+    requestRender();
+  }
+}
+function showProcedureVariant(points) {
+  clearProcedureMarkers();
+  if (!activeEcorcheGroup) return;
+  const box2 = new THREE.Box3().setFromObject(activeEcorcheGroup);
+  const size2b = box2.getSize(new THREE.Vector3());
+  const center2b = box2.getCenter(new THREE.Vector3());
+  const meshes = [];
+  activeEcorcheGroup.traverse(o => { if (o.isMesh) meshes.push(o); });
+  const raycaster = new THREE.Raycaster();
+  const margin = size2b.length() * 0.6;
+  const dotRadius = size2b.y * 0.0055;
+  const dotGeo = new THREE.SphereGeometry(dotRadius, 24, 16);
+  const hitGeo = new THREE.SphereGeometry(dotRadius * 2.6, 10, 8);
+  const group = new THREE.Group();
+  points.forEach(pt => {
+    const hit = raycastBodyPoint(meshes, box2, size2b, center2b, pt.h, pt.x, 'front', raycaster, margin);
+    if (!hit) { console.warn('Procedure point missed the model surface:', pt.label); return; }
+    const mat = new THREE.MeshBasicMaterial({ color: ROLE_COLOR[pt.role], transparent: true, opacity: 0.85 });
+    const dot = new THREE.Mesh(dotGeo, mat);
+    dot.position.copy(hit.point);
+    const glow = makeGlowSprite(size2b.y * 0.026);
+    glow.position.copy(hit.point).addScaledVector(hit.normal, size2b.y * 0.001);
+    const hitbox = new THREE.Mesh(hitGeo, new THREE.MeshBasicMaterial({ visible: false }));
+    hitbox.position.copy(hit.point);
+    group.add(dot, glow, hitbox);
+    activeProcedureDots.push({ hitbox, dot, glow, pointRef: pt });
+  });
+  scene.add(group);
+  activeProcedureGroup = group;
+  requestRender();
 }
 
 // Two selectable looks for the écorché body. Both start from each
@@ -1096,11 +1374,15 @@ async function applyBodyType(type) {
   activeAccessPoints = showObese ? ecorcheObeseAccessPoints : ecorcheAccessPoints;
   if (activeAccessPoints) {
     activeAccessPoints.lap.visible = lapToggle.checked;
-    activeAccessPoints.vasc.visible = vascToggle.checked;
     activeAccessPoints.robot.visible = robotToggle.checked;
   }
   typeStandardBtn.classList.toggle('active', !showObese);
   typeObeseBtn.classList.toggle('active', showObese);
+  // A procedure marker set is raycast against whichever body was active
+  // when built, so switching body type needs a fresh rebuild.
+  const proc = PROCEDURES.find(p => p.key === procedureSelect.value);
+  const variant = proc && proc.variants.find(v => v.key === procedureVariantSelect.value);
+  if (variant) showProcedureVariant(variant.points);
   requestRender();
 }
 typeStandardBtn.addEventListener('click', () => applyBodyType('standard'));
@@ -1168,6 +1450,7 @@ async function applyPreset(key, cardEl) {
       }
     });
     accessPointsBox.hidden = false;
+    procedureBox.hidden = !lapToggle.checked;
     bodyStyleRow.hidden = false;
     bodyTypeRow.hidden = false;
     await ensureEcorcheLoaded();
@@ -1186,10 +1469,11 @@ async function applyPreset(key, cardEl) {
   }
 
   accessPointsBox.hidden = true;
+  procedureBox.hidden = true;
+  clearProcedureMarkers();
   bodyStyleRow.hidden = true;
   bodyTypeRow.hidden = true;
   lapToggle.checked = false;
-  vascToggle.checked = false;
   robotToggle.checked = false;
   useBloom = false;
   if (ecorcheAccessPoints) { ecorcheAccessPoints.lap.visible = false; ecorcheAccessPoints.vasc.visible = false; ecorcheAccessPoints.robot.visible = false; }
@@ -1233,10 +1517,11 @@ async function applyGroupFilter(keys) {
 document.getElementById('showAll').addEventListener('click', async () => {
   activePresetKey = null;
   accessPointsBox.hidden = true;
+  procedureBox.hidden = true;
+  clearProcedureMarkers();
   bodyStyleRow.hidden = true;
   bodyTypeRow.hidden = true;
   lapToggle.checked = false;
-  vascToggle.checked = false;
   robotToggle.checked = false;
   useBloom = false;
   if (ecorcheAccessPoints) { ecorcheAccessPoints.lap.visible = false; ecorcheAccessPoints.vasc.visible = false; ecorcheAccessPoints.robot.visible = false; }
@@ -1260,16 +1545,20 @@ document.getElementById('showAll').addEventListener('click', async () => {
 });
 lapDot.style.color = '#' + LAP_COLOR.toString(16).padStart(6, '0');
 lapDot.style.background = lapDot.style.color;
-vascDot.style.color = '#' + VASC_COLOR.toString(16).padStart(6, '0');
-vascDot.style.background = vascDot.style.color;
 robotDot.style.color = '#' + ROBOT_COLOR.toString(16).padStart(6, '0');
 robotDot.style.background = robotDot.style.color;
 lapToggle.addEventListener('change', () => {
   if (activeAccessPoints) activeAccessPoints.lap.visible = lapToggle.checked;
-  requestRender();
-});
-vascToggle.addEventListener('change', () => {
-  if (activeAccessPoints) activeAccessPoints.vasc.visible = vascToggle.checked;
+  // The procedure-specific submenu opens under the Laparoscopic toggle — a
+  // future phase adds an equivalent submenu under Robotic.
+  procedureBox.hidden = !lapToggle.checked;
+  if (!lapToggle.checked) {
+    procedureSelect.value = '';
+    procedureVariantSelect.innerHTML = '<option value="">Select a variant…</option>';
+    procedureVariantSelect.disabled = true;
+    procedureNote.textContent = '';
+    clearProcedureMarkers();
+  }
   requestRender();
 });
 robotToggle.addEventListener('change', () => {
