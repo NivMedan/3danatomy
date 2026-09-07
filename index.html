@@ -243,6 +243,7 @@
 import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.160.0/+esm';
 import { FBXLoader } from 'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/loaders/FBXLoader.js/+esm';
 import { GLTFLoader } from 'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/loaders/GLTFLoader.js/+esm';
+import { DRACOLoader } from 'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/loaders/DRACOLoader.js/+esm';
 import { OrbitControls } from 'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/controls/OrbitControls.js/+esm';
 import { EffectComposer } from 'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/postprocessing/EffectComposer.js/+esm';
 import { RenderPass } from 'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/postprocessing/RenderPass.js/+esm';
@@ -554,13 +555,20 @@ let hexGridRef = null;
 let logoMeshRef = null;
 
 const loader = new FBXLoader();
+
+// Shared GLTFLoader for the Standard/Obese whole-body models, both Draco-
+// compressed (30MB -> 5.6MB / 832KB -> 63KB) to cut initial load time —
+// needs a DRACOLoader attached to decode the compressed geometry.
+const dracoLoader = new DRACOLoader();
+dracoLoader.setDecoderPath('https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/libs/draco/');
+const gltfLoader = new GLTFLoader();
+gltfLoader.setDRACOLoader(dracoLoader);
 loader.manager.onError = (url) => console.warn('Missing resource (expected — dangling refs in source FBX):', url);
 
-let loadedCount = 0;
-const total = CLASSIFICATION.length;
-
-Promise.all(CLASSIFICATION.map(item =>
-  loader.loadAsync(`./Newmesh/${item.dir}/${item.file}`).then(obj => {
+// Load and tint a single CLASSIFICATION entry's FBX part (shared by the
+// initial skeleton load and the lazy per-group loader below).
+function loadClassificationItem(item) {
+  return loader.loadAsync(`./Newmesh/${item.dir}/${item.file}`).then(obj => {
     const style = styleFor(item);
     const tint = new THREE.Color(style.color);
     obj.traverse(o => {
@@ -583,15 +591,33 @@ Promise.all(CLASSIFICATION.map(item =>
     });
     partsByFile[item.file] = obj;
     root.add(obj);
-    loadedCount++;
-    const pct = Math.round((loadedCount / total) * 100);
-    statusEl.firstChild.textContent = `Loading parts… ${loadedCount}/${total}`;
-    barFillEl.style.width = pct + '%';
   }).catch(err => {
     console.error('Failed to load', item.file, err);
-    loadedCount++;
-  })
-)).then(async () => {
+  });
+}
+
+// Torso-preset parts (muscles/heart/vasculature/organs/ducts — everything
+// except skeleton) load lazily, per group, on first use instead of all ~52
+// files eagerly at page start — none of them are visible on the default
+// Whole Body landing view, so loading them upfront just delayed that view
+// for no benefit. `loadedGroups`/`groupLoadPromises` make each group's load
+// happen (and get awaited) exactly once no matter how many places ask for it.
+const loadedGroups = new Set();
+const groupLoadPromises = {};
+function ensureGroupLoaded(key) {
+  if (loadedGroups.has(key)) return Promise.resolve();
+  if (groupLoadPromises[key]) return groupLoadPromises[key];
+  const items = CLASSIFICATION.filter(c => c.group === key);
+  groupLoadPromises[key] = Promise.all(items.map(loadClassificationItem)).then(() => {
+    loadedGroups.add(key);
+  });
+  return groupLoadPromises[key];
+}
+
+// Skeleton (Pelvis + Spine) loads eagerly — it's small, and its bounding box
+// spans the full torso length, which is all that's needed to stand the rig
+// up and frame the default torso camera view before anything else exists.
+ensureGroupLoaded('skeleton').then(async () => {
   // Stand the model up: source rig is authored lying supine with the body's
   // long axis along Z. Center/scale first, then rotate +90° about X so the
   // long axis becomes vertical (Y), skull up.
@@ -649,7 +675,8 @@ Promise.all(CLASSIFICATION.map(item =>
   applyPreset('whole', wholeCard);
 });
 
-function setGroupVisible(key, visible) {
+async function setGroupVisible(key, visible) {
+  if (visible) await ensureGroupLoaded(key);
   itemsForGroup(key).forEach(({ file }) => { const p = partsByFile[file]; if (p) p.visible = visible; });
   requestRender();
 }
@@ -680,8 +707,8 @@ function buildSidebar() {
     cb.type = 'checkbox';
     cb.checked = true;
     cb.addEventListener('click', (e) => e.stopPropagation());
-    cb.addEventListener('change', () => {
-      setGroupVisible(meta.key, cb.checked);
+    cb.addEventListener('change', async () => {
+      await setGroupVisible(meta.key, cb.checked);
       itemChecks.forEach(c => c.checked = cb.checked);
     });
 
@@ -698,7 +725,10 @@ function buildSidebar() {
     head.appendChild(title);
     head.appendChild(count);
     head.appendChild(chevron);
-    head.addEventListener('click', () => el.classList.toggle('open'));
+    head.addEventListener('click', () => {
+      el.classList.toggle('open');
+      if (el.classList.contains('open')) ensureGroupLoaded(meta.key);
+    });
 
     el.appendChild(head);
 
@@ -712,7 +742,8 @@ function buildSidebar() {
       icb.type = 'checkbox';
       icb.checked = true;
       icb.id = 'item_' + meta.key + '_' + i;
-      icb.addEventListener('change', () => {
+      icb.addEventListener('change', async () => {
+        if (icb.checked) await ensureGroupLoaded(meta.key);
         const p = partsByFile[c.file];
         if (p) p.visible = icb.checked;
         cb.checked = itemChecks.some(x => x.checked);
@@ -786,13 +817,16 @@ const ACCESS_POINTS = [
   // from screenshots. h/x calibrated against Standard; obeseH/obeseX
   // calibrated separately against the Obese model (its different proportions
   // and T-pose arms mean the two don't share coordinates).
-  { label: 'Arterial Line', group: 'vasc', h: 0.496, x: -0.460, dir: 'front', obeseH: 0.791, obeseX: -0.380 },
-  { label: 'PICC', group: 'vasc', h: 0.652, x: -0.367, dir: 'front', obeseH: 0.777, obeseX: -0.238 },
-  { label: 'Midline', group: 'vasc', h: 0.682, x: 0.314, dir: 'front', obeseH: 0.775, obeseX: 0.232 },
+  { label: 'Radial', group: 'vasc', h: 0.496, x: -0.460, dir: 'front', obeseH: 0.791, obeseX: -0.380 },
   { label: 'Peripheral IV', group: 'vasc', h: 0.599, x: 0.379, dir: 'front', obeseH: 0.776, obeseX: 0.337 },
-  { label: 'Large Bore Femoral', group: 'vasc', h: 0.464, x: 0.069, dir: 'front', obeseH: 0.502, obeseX: 0.069 },
-  { label: 'Small Bore Mid Thigh Femoral', group: 'vasc', h: 0.427, x: 0.068, dir: 'front', obeseH: 0.429, obeseX: 0.038 },
-  { label: 'Small Bore Axillary', group: 'vasc', h: 0.823, x: -0.126, dir: 'front', obeseH: 0.818, obeseX: -0.060 },
+  // Mirrored pair — same calibrated position, reflected to the opposite side.
+  // Anterior-view convention: patient's right is shown on the viewer's left.
+  { label: 'Left Femoral Artery', group: 'vasc', h: 0.464, x: 0.069, dir: 'front', obeseH: 0.502, obeseX: 0.069 },
+  { label: 'Right Femoral Artery', group: 'vasc', h: 0.464, x: -0.069, dir: 'front', obeseH: 0.502, obeseX: -0.069 },
+  { label: 'Subclavian Artery', group: 'vasc', h: 0.823, x: -0.126, dir: 'front', obeseH: 0.818, obeseX: -0.060 },
+  // Estimated (not yet picked with the calibration tool) — pedal pulse, top
+  // of the foot near the ankle. Verify/adjust with a calibration click.
+  { label: 'Pedal', group: 'vasc', h: 0.045, x: 0.16, dir: 'front', obeseH: 0.045, obeseX: 0.09 },
   // Robotic surgery port template — placed directly against a screenshot of
   // this model with the real 5 port positions marked, then relabeled per
   // explicit correction: top row is Camera (center) + Assistant (both
@@ -1014,7 +1048,7 @@ async function ensureObeseVariant() {
     statusEl.style.display = '';
     statusEl.firstChild.textContent = 'Loading obese body type…';
     barFillEl.style.width = '0%';
-    const gltf = await new GLTFLoader().loadAsync('./Newmesh/obese.glb', (xhr) => {
+    const gltf = await gltfLoader.loadAsync('./Newmesh/obese.glb', (xhr) => {
       if (xhr.lengthComputable) barFillEl.style.width = Math.round(xhr.loaded / xhr.total * 100) + '%';
     });
     const obj = gltf.scene;
@@ -1079,7 +1113,7 @@ async function ensureEcorcheLoaded() {
     statusEl.style.display = '';
     statusEl.firstChild.textContent = 'Loading full-body view…';
     barFillEl.style.width = '0%';
-    const gltf = await new GLTFLoader().loadAsync('./male_full_body_ecorche.glb', (xhr) => {
+    const gltf = await gltfLoader.loadAsync('./male_full_body_ecorche.glb', (xhr) => {
       if (xhr.lengthComputable) barFillEl.style.width = Math.round(xhr.loaded / xhr.total * 100) + '%';
     });
     const obj = gltf.scene;
@@ -1165,28 +1199,38 @@ async function applyPreset(key, cardEl) {
   if (ecorcheModel) ecorcheModel.visible = false;
   if (ecorcheObeseModel) ecorcheObeseModel.visible = false;
   const preset = PRESETS.find(p => p.key === key);
-  applyGroupFilter(preset.groups);
+  await applyGroupFilter(preset.groups);
+  // Guard against a torso group's lazy load resolving after the user has
+  // already clicked a different preset (mirrors the same guard on 'whole').
+  if (activePresetKey !== key) return;
   requestRender();
 }
 
 // Shows exactly the given GROUP_META keys, hides the rest, and keeps the
 // sidebar checkboxes in sync — shared by applyPreset and the "Reset view"
 // button (which applies its own default filter rather than just recentering).
-function applyGroupFilter(keys) {
+async function applyGroupFilter(keys) {
   const active = new Set(keys);
-  GROUP_META.forEach(meta => {
+  const needsLoading = [...active].some(key => !loadedGroups.has(key));
+  if (needsLoading) {
+    statusEl.style.display = '';
+    statusEl.firstChild.textContent = 'Loading parts…';
+    barFillEl.style.width = '60%';
+  }
+  await Promise.all(GROUP_META.map(async meta => {
     const visible = active.has(meta.key);
-    setGroupVisible(meta.key, visible);
+    await setGroupVisible(meta.key, visible);
     const groupEl = groupElByKey[meta.key];
     if (groupEl) {
       const headCb = groupEl.querySelector('.group-head input[type="checkbox"]');
       headCb.checked = visible;
       groupEl.querySelectorAll('.item-row input').forEach(icb => icb.checked = visible);
     }
-  });
+  }));
+  if (needsLoading) statusEl.style.display = 'none';
 }
 
-document.getElementById('showAll').addEventListener('click', () => {
+document.getElementById('showAll').addEventListener('click', async () => {
   activePresetKey = null;
   accessPointsBox.hidden = true;
   bodyStyleRow.hidden = true;
@@ -1201,6 +1245,14 @@ document.getElementById('showAll').addEventListener('click', () => {
   topbarH1.textContent = 'Abdominothoracic Region';
   if (ecorcheModel) ecorcheModel.visible = false;
   if (ecorcheObeseModel) ecorcheObeseModel.visible = false;
+  const needsLoading = GROUP_META.some(meta => !loadedGroups.has(meta.key));
+  if (needsLoading) {
+    statusEl.style.display = '';
+    statusEl.firstChild.textContent = 'Loading parts…';
+    barFillEl.style.width = '60%';
+  }
+  await Promise.all(GROUP_META.map(meta => ensureGroupLoaded(meta.key)));
+  if (needsLoading) statusEl.style.display = 'none';
   Object.values(partsByFile).forEach(p => p.visible = true);
   document.querySelectorAll('#groups input[type="checkbox"]').forEach(cb => cb.checked = true);
   document.querySelectorAll('.preset-card').forEach(c => c.classList.remove('active'));
