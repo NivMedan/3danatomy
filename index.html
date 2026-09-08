@@ -112,11 +112,31 @@
   #procedureBox { margin: var(--size-xs) var(--size-xs) 0; padding-top: var(--size-xxs); border-top: 1px solid var(--border-soft); }
   #procedureBox[hidden] { display: none; }
   #procedureSelects { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; }
-  #procedureSelects select {
+  /* Native <select> elements are kept (hidden) purely as the underlying
+     value/state holder — every existing .value/.disabled/.addEventListener
+     call keeps working untouched. The custom-select-trigger/menu below is
+     the only thing the user actually sees/clicks, so opening it never
+     invokes the OS's native dropdown popup, which — even with
+     color-scheme: dark set — still visibly flashed light in some browsers
+     when it opened/closed. */
+  #procedureSelects select { position: absolute; opacity: 0; pointer-events: none; width: 1px; height: 1px; }
+  .custom-select { position: relative; }
+  .custom-select-trigger {
     width: 100%; padding: 8px 10px; border-radius: var(--radius-md); border: 1px solid var(--border-soft);
     background: var(--panel-2); color: var(--text); font-size: 12px; font-family: var(--font-body);
+    text-align: left; cursor: pointer; display: flex; align-items: center; justify-content: space-between; gap: 6px;
   }
-  #procedureSelects select:disabled { opacity: 0.5; }
+  .custom-select-trigger::after { content: '▾'; color: var(--text-dim); font-size: 10px; }
+  .custom-select-trigger:disabled { opacity: 0.5; cursor: default; }
+  .custom-select-trigger.placeholder { color: var(--text-dim); }
+  .custom-select-menu {
+    position: absolute; left: 0; right: 0; top: calc(100% + 4px); z-index: 20; max-height: 220px; overflow-y: auto;
+    background: var(--panel-2); border: 1px solid var(--border-soft); border-radius: var(--radius-md);
+    box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+  }
+  .custom-select-menu[hidden] { display: none; }
+  .custom-select-option { padding: 7px 10px; font-size: 12px; color: var(--text); cursor: pointer; }
+  .custom-select-option:hover, .custom-select-option.active { background: var(--accent-hover); }
   #procedureLegend { display: flex; gap: 12px; margin-top: 8px; font-size: 11px; color: var(--text-dim); }
   #procedureLegend i { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 4px; vertical-align: middle; border: 1px solid rgba(255,255,255,0.4); box-sizing: border-box; }
   #procedureNote { margin-top: 6px; font-size: 11px; color: var(--text-dim); line-height: 1.4; min-height: 1em; }
@@ -224,6 +244,15 @@
         <span>Laparoscopic access points</span>
       </label>
       <label class="ap-row">
+        <input type="checkbox" id="vascToggle" />
+        <svg class="ap-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M3 18.5c3-1 3-4 6-4s3 3.2 6 2.7 2.7-3.7 5.5-4.4"/>
+          <circle cx="19.3" cy="6" r="1.6"/><path d="M19.3 7.6c0 2.6-1.8 3.6-1.8 3.6"/>
+        </svg>
+        <span class="ap-dot" id="vascDot"></span>
+        <span>Vascular access points</span>
+      </label>
+      <label class="ap-row">
         <input type="checkbox" id="robotToggle" />
         <svg class="ap-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
           <circle cx="4.5" cy="19" r="1.7"/><line x1="5.8" y1="17.8" x2="11" y2="12.3"/>
@@ -240,9 +269,17 @@
         <select id="procedureSelect">
           <option value="">Select a procedure…</option>
         </select>
+        <div class="custom-select" id="procedureSelectWrap">
+          <button type="button" class="custom-select-trigger placeholder" id="procedureSelectTrigger">Select a procedure…</button>
+          <div class="custom-select-menu" id="procedureSelectMenu" hidden></div>
+        </div>
         <select id="procedureVariantSelect" disabled>
           <option value="">Select a variant…</option>
         </select>
+        <div class="custom-select" id="procedureVariantSelectWrap">
+          <button type="button" class="custom-select-trigger placeholder" id="procedureVariantSelectTrigger" disabled>Select a variant…</button>
+          <div class="custom-select-menu" id="procedureVariantSelectMenu" hidden></div>
+        </div>
       </div>
       <div id="procedureLegend">
         <span><i style="background:#d32f2f"></i>Camera</span>
@@ -288,10 +325,16 @@ const accessPointsBox = document.getElementById('accessPointsBox');
 const procedureBox = document.getElementById('procedureBox');
 const procedureSelect = document.getElementById('procedureSelect');
 const procedureVariantSelect = document.getElementById('procedureVariantSelect');
+const procedureSelectTrigger = document.getElementById('procedureSelectTrigger');
+const procedureSelectMenu = document.getElementById('procedureSelectMenu');
+const procedureVariantSelectTrigger = document.getElementById('procedureVariantSelectTrigger');
+const procedureVariantSelectMenu = document.getElementById('procedureVariantSelectMenu');
 const procedureNote = document.getElementById('procedureNote');
 const lapToggle = document.getElementById('lapToggle');
+const vascToggle = document.getElementById('vascToggle');
 const robotToggle = document.getElementById('robotToggle');
 const lapDot = document.getElementById('lapDot');
+const vascDot = document.getElementById('vascDot');
 const robotDot = document.getElementById('robotDot');
 const bodyStyleRow = document.getElementById('bodyStyleRow');
 const styleClassicBtn = document.getElementById('styleClassic');
@@ -807,6 +850,49 @@ function buildPresets() {
 
 // Populates the procedure/variant dropdowns from PROCEDURES and wires up
 // selection to show/hide the matching marker set.
+// The visible procedure/variant pickers are custom divs, not native
+// <select> popups — even with color-scheme: dark set, some browsers still
+// visibly flash light when a native <select> list opens/closes. The real
+// <select> elements are kept (invisibly) purely as the value/state holder
+// so the rest of the app's .value/.disabled/'change' logic is untouched;
+// these two helpers just keep the custom UI in sync with them.
+function renderSelectMenu(selectEl, menuEl, onPick) {
+  menuEl.innerHTML = '';
+  Array.from(selectEl.options).forEach(opt => {
+    if (!opt.value) return; // skip the placeholder option
+    const row = document.createElement('div');
+    row.className = 'custom-select-option';
+    row.textContent = opt.textContent;
+    row.addEventListener('click', () => onPick(opt.value));
+    menuEl.appendChild(row);
+  });
+}
+function updateSelectTrigger(selectEl, triggerEl) {
+  const selected = Array.from(selectEl.options).find(o => o.value === selectEl.value);
+  const placeholder = selectEl.options[0] ? selectEl.options[0].textContent : '';
+  triggerEl.textContent = (selected && selected.value) ? selected.textContent : placeholder;
+  triggerEl.classList.toggle('placeholder', !(selected && selected.value));
+  triggerEl.disabled = selectEl.disabled;
+}
+function closeAllCustomSelectMenus() {
+  procedureSelectMenu.hidden = true;
+  procedureVariantSelectMenu.hidden = true;
+}
+procedureSelectTrigger.addEventListener('click', (ev) => {
+  ev.stopPropagation();
+  const willOpen = procedureSelectMenu.hidden;
+  closeAllCustomSelectMenus();
+  procedureSelectMenu.hidden = !willOpen;
+});
+procedureVariantSelectTrigger.addEventListener('click', (ev) => {
+  ev.stopPropagation();
+  if (procedureVariantSelectTrigger.disabled) return;
+  const willOpen = procedureVariantSelectMenu.hidden;
+  closeAllCustomSelectMenus();
+  procedureVariantSelectMenu.hidden = !willOpen;
+});
+document.addEventListener('click', closeAllCustomSelectMenus);
+
 function buildProcedureSelects() {
   PROCEDURES.forEach(proc => {
     const opt = document.createElement('option');
@@ -814,6 +900,12 @@ function buildProcedureSelects() {
     opt.textContent = proc.label;
     procedureSelect.appendChild(opt);
   });
+  renderSelectMenu(procedureSelect, procedureSelectMenu, (value) => {
+    procedureSelect.value = value;
+    procedureSelect.dispatchEvent(new Event('change', { bubbles: true }));
+    closeAllCustomSelectMenus();
+  });
+  updateSelectTrigger(procedureSelect, procedureSelectTrigger);
 
   function selectVariant(variant) {
     clearProcedureMarkers();
@@ -822,10 +914,13 @@ function buildProcedureSelects() {
   }
 
   procedureSelect.addEventListener('change', () => {
+    updateSelectTrigger(procedureSelect, procedureSelectTrigger);
     procedureVariantSelect.innerHTML = '<option value="">Select a variant…</option>';
     const proc = PROCEDURES.find(p => p.key === procedureSelect.value);
     if (!proc) {
       procedureVariantSelect.disabled = true;
+      renderSelectMenu(procedureVariantSelect, procedureVariantSelectMenu, () => {});
+      updateSelectTrigger(procedureVariantSelect, procedureVariantSelectTrigger);
       selectVariant(null);
       return;
     }
@@ -839,10 +934,17 @@ function buildProcedureSelects() {
     // Default to the first variant instead of requiring an extra click —
     // every procedure has at least one, so there's always a sane default.
     procedureVariantSelect.value = proc.variants[0].key;
+    renderSelectMenu(procedureVariantSelect, procedureVariantSelectMenu, (value) => {
+      procedureVariantSelect.value = value;
+      procedureVariantSelect.dispatchEvent(new Event('change', { bubbles: true }));
+      closeAllCustomSelectMenus();
+    });
+    updateSelectTrigger(procedureVariantSelect, procedureVariantSelectTrigger);
     selectVariant(proc.variants[0]);
   });
 
   procedureVariantSelect.addEventListener('change', () => {
+    updateSelectTrigger(procedureVariantSelect, procedureVariantSelectTrigger);
     const proc = PROCEDURES.find(p => p.key === procedureSelect.value);
     const variant = proc && proc.variants.find(v => v.key === procedureVariantSelect.value);
     selectVariant(variant);
@@ -879,13 +981,23 @@ let activeAccessPoints = null;
 // spot so it lands exactly on the model's real surface regardless of this
 // particular mesh's proportions.
 const ACCESS_POINTS = [
-  // Laparoscopic entry points (anterior abdomen)
-  { label: 'Umbilicus', group: 'lap', h: 0.60, x: 0, dir: 'front' },
-  { label: 'Lee Huang Point', group: 'lap', h: 0.665, x: -0.05, dir: 'front', obeseX: -0.021 },
-  { label: "Palmer's Point", group: 'lap', h: 0.648, x: 0.128, dir: 'front', obeseH: 0.648, obeseX: 0.171 },
-  { label: 'Jain Point', group: 'lap', h: 0.60, x: 0.18, dir: 'front' },
-  { label: 'ASIS', group: 'lap', h: 0.495, x: 0.26, dir: 'front' },
-  { label: 'ASIS', group: 'lap', h: 0.495, x: -0.26, dir: 'front' },
+  // Generic laparoscopic entry landmarks (Umbilicus, Lee Huang/Palmer's/Jain
+  // points, ASIS) were removed — superseded by the per-procedure trocar
+  // positions in PROCEDURES, which are precise per configuration rather than
+  // generic reference points.
+  // Vascular access points — positions picked directly on the model surface
+  // via the in-app "Calibrate points" tool (click-to-raycast), not estimated
+  // from screenshots. h/x calibrated against Standard; obeseH/obeseX
+  // calibrated separately against the Obese model (its different proportions
+  // and T-pose arms mean the two don't share coordinates).
+  { label: 'Radial', group: 'vasc', h: 0.496, x: -0.460, dir: 'front', obeseH: 0.791, obeseX: -0.380 },
+  { label: 'Peripheral IV', group: 'vasc', h: 0.599, x: 0.379, dir: 'front', obeseH: 0.776, obeseX: 0.337 },
+  // Mirrored pair — same calibrated position, reflected to the opposite side.
+  // Anterior-view convention: patient's right is shown on the viewer's left.
+  { label: 'Left Femoral Artery', group: 'vasc', h: 0.464, x: 0.069, dir: 'front', obeseH: 0.502, obeseX: 0.069 },
+  { label: 'Right Femoral Artery', group: 'vasc', h: 0.464, x: -0.069, dir: 'front', obeseH: 0.502, obeseX: -0.069 },
+  { label: 'Subclavian Artery', group: 'vasc', h: 0.823, x: -0.126, dir: 'front', obeseH: 0.818, obeseX: -0.060 },
+  { label: 'Pedal', group: 'vasc', h: 0.045, x: -0.16, dir: 'front', obeseH: 0.045, obeseX: -0.09 },
   // Robotic surgery port template — placed directly against a screenshot of
   // this model with the real 5 port positions marked, then relabeled per
   // explicit correction: top row is Camera (center) + Assistant (both
@@ -1374,6 +1486,7 @@ async function applyBodyType(type) {
   activeAccessPoints = showObese ? ecorcheObeseAccessPoints : ecorcheAccessPoints;
   if (activeAccessPoints) {
     activeAccessPoints.lap.visible = lapToggle.checked;
+    activeAccessPoints.vasc.visible = vascToggle.checked;
     activeAccessPoints.robot.visible = robotToggle.checked;
   }
   typeStandardBtn.classList.toggle('active', !showObese);
@@ -1474,6 +1587,7 @@ async function applyPreset(key, cardEl) {
   bodyStyleRow.hidden = true;
   bodyTypeRow.hidden = true;
   lapToggle.checked = false;
+  vascToggle.checked = false;
   robotToggle.checked = false;
   useBloom = false;
   if (ecorcheAccessPoints) { ecorcheAccessPoints.lap.visible = false; ecorcheAccessPoints.vasc.visible = false; ecorcheAccessPoints.robot.visible = false; }
@@ -1522,6 +1636,7 @@ document.getElementById('showAll').addEventListener('click', async () => {
   bodyStyleRow.hidden = true;
   bodyTypeRow.hidden = true;
   lapToggle.checked = false;
+  vascToggle.checked = false;
   robotToggle.checked = false;
   useBloom = false;
   if (ecorcheAccessPoints) { ecorcheAccessPoints.lap.visible = false; ecorcheAccessPoints.vasc.visible = false; ecorcheAccessPoints.robot.visible = false; }
@@ -1545,6 +1660,8 @@ document.getElementById('showAll').addEventListener('click', async () => {
 });
 lapDot.style.color = '#' + LAP_COLOR.toString(16).padStart(6, '0');
 lapDot.style.background = lapDot.style.color;
+vascDot.style.color = '#' + VASC_COLOR.toString(16).padStart(6, '0');
+vascDot.style.background = vascDot.style.color;
 robotDot.style.color = '#' + ROBOT_COLOR.toString(16).padStart(6, '0');
 robotDot.style.background = robotDot.style.color;
 lapToggle.addEventListener('change', () => {
@@ -1554,11 +1671,18 @@ lapToggle.addEventListener('change', () => {
   procedureBox.hidden = !lapToggle.checked;
   if (!lapToggle.checked) {
     procedureSelect.value = '';
+    updateSelectTrigger(procedureSelect, procedureSelectTrigger);
     procedureVariantSelect.innerHTML = '<option value="">Select a variant…</option>';
     procedureVariantSelect.disabled = true;
+    renderSelectMenu(procedureVariantSelect, procedureVariantSelectMenu, () => {});
+    updateSelectTrigger(procedureVariantSelect, procedureVariantSelectTrigger);
     procedureNote.textContent = '';
     clearProcedureMarkers();
   }
+  requestRender();
+});
+vascToggle.addEventListener('change', () => {
+  if (activeAccessPoints) activeAccessPoints.vasc.visible = vascToggle.checked;
   requestRender();
 });
 robotToggle.addEventListener('change', () => {
