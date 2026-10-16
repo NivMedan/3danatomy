@@ -288,7 +288,7 @@
       </div>
       <div id="procedureNote"></div>
     </div>
-    <div id="groups"></div>
+    <div id="groups" hidden></div>
   </div>
 </div>
 
@@ -1216,6 +1216,14 @@ function makeGlowSprite(radius) {
 // misses entirely) the cast direction, so a rough estimate reliably lands on
 // real geometry instead of being dropped. Shared by the static ACCESS_POINTS
 // build below and the dynamic per-procedure marker builder further down.
+// Quick revert: set to false to restore the previous placement behaviour.
+// The écorché's front muscle layer has a seam at the midline, so a ray cast
+// at x ≈ 0 can slip through it and land on a deeper layer ~15 cm inside the
+// body — those points show up only faintly through the semi-transparent skin.
+// With this on, each front-cast hit is re-checked against a few rays within
+// ~6 mm either side and the front-most surface wins (same on-screen spot,
+// correct depth).
+const PLACEMENT_FRONTMOST_FIX = true;
 function raycastBodyPoint(meshes, box2, size2b, center2b, h, x, dir, raycaster, margin) {
   const targetY = box2.min.y + h * size2b.y;
   const xFractions = [x, x * 0.75, x * 1.4, x * 0.5, x * 1.8, x * 0.3, x * 0.15, x * 2.4];
@@ -1232,7 +1240,16 @@ function raycastBodyPoint(meshes, box2, size2b, center2b, h, x, dir, raycaster, 
       raycaster.far = margin * 2.2;
       const hits = raycaster.intersectObjects(meshes, false);
       if (hits.length) {
-        const hit = hits[0];
+        let hit = hits[0];
+        if (PLACEMENT_FRONTMOST_FIX && d === 'front') {
+          const step = size2b.y * 0.0035;
+          for (const off of [-1, -0.5, 0.5, 1]) {
+            raycaster.set(new THREE.Vector3(targetX + off * step, targetY, box2.max.z + margin), new THREE.Vector3(0, 0, -1));
+            raycaster.far = margin * 2.2;
+            const alt = raycaster.intersectObjects(meshes, false)[0];
+            if (alt && alt.point.z > hit.point.z + size2b.y * 0.004) hit = alt;
+          }
+        }
         const normal = hit.face.normal.clone().transformDirection(hit.object.matrixWorld).normalize();
         return { point: hit.point.clone().addScaledVector(normal, size2b.y * 0.002), normal };
       }
@@ -1563,6 +1580,9 @@ async function applyPreset(key, cardEl) {
       }
     });
     accessPointsBox.hidden = false;
+    // The anatomy-layer list belongs to the torso views only — it can't
+    // coexist with Whole Body.
+    groupsEl.hidden = true;
     procedureBox.hidden = !lapToggle.checked;
     bodyStyleRow.hidden = false;
     bodyTypeRow.hidden = false;
@@ -1582,6 +1602,7 @@ async function applyPreset(key, cardEl) {
   }
 
   accessPointsBox.hidden = true;
+  groupsEl.hidden = false;
   procedureBox.hidden = true;
   clearProcedureMarkers();
   bodyStyleRow.hidden = true;
@@ -1631,6 +1652,7 @@ async function applyGroupFilter(keys) {
 document.getElementById('showAll').addEventListener('click', async () => {
   activePresetKey = null;
   accessPointsBox.hidden = true;
+  groupsEl.hidden = false;
   procedureBox.hidden = true;
   clearProcedureMarkers();
   bodyStyleRow.hidden = true;
@@ -1664,8 +1686,15 @@ vascDot.style.color = '#' + VASC_COLOR.toString(16).padStart(6, '0');
 vascDot.style.background = vascDot.style.color;
 robotDot.style.color = '#' + ROBOT_COLOR.toString(16).padStart(6, '0');
 robotDot.style.background = robotDot.style.color;
-lapToggle.addEventListener('change', () => {
-  if (activeAccessPoints) activeAccessPoints.lap.visible = lapToggle.checked;
+// The three access-point toggles are mutually exclusive: turning one on turns
+// the others off (and removes their points), so only one set of points is ever
+// on screen. Unchecking the active one leaves nothing showing.
+function applyAccessToggles() {
+  if (activeAccessPoints) {
+    activeAccessPoints.lap.visible = lapToggle.checked;
+    activeAccessPoints.vasc.visible = vascToggle.checked;
+    activeAccessPoints.robot.visible = robotToggle.checked;
+  }
   // The procedure-specific submenu opens under the Laparoscopic toggle — a
   // future phase adds an equivalent submenu under Robotic.
   procedureBox.hidden = !lapToggle.checked;
@@ -1678,16 +1707,15 @@ lapToggle.addEventListener('change', () => {
     updateSelectTrigger(procedureVariantSelect, procedureVariantSelectTrigger);
     procedureNote.textContent = '';
     clearProcedureMarkers();
+    closeAllCustomSelectMenus();
   }
   requestRender();
-});
-vascToggle.addEventListener('change', () => {
-  if (activeAccessPoints) activeAccessPoints.vasc.visible = vascToggle.checked;
-  requestRender();
-});
-robotToggle.addEventListener('change', () => {
-  if (activeAccessPoints) activeAccessPoints.robot.visible = robotToggle.checked;
-  requestRender();
+}
+[lapToggle, vascToggle, robotToggle].forEach(toggle => {
+  toggle.addEventListener('change', () => {
+    if (toggle.checked) [lapToggle, vascToggle, robotToggle].forEach(other => { if (other !== toggle) other.checked = false; });
+    applyAccessToggles();
+  });
 });
 styleClassicBtn.addEventListener('click', () => {
   applyBodyStyle('classic');
@@ -1723,6 +1751,37 @@ renderer.domElement.addEventListener('pointermove', (ev) => {
   }
 });
 renderer.domElement.addEventListener('pointerleave', () => { apTooltip.style.display = 'none'; });
+
+// --- Structure hover tooltips (Skeleton / Organs / Vascular / Heart / Show all)
+// Names whatever visible structure is under the cursor. Throttled, and skipped
+// while a button is held so rotating/panning never pays for raycasts.
+const partLabelByFile = {};
+CLASSIFICATION.forEach(c => { partLabelByFile[c.file] = c.label.replace(/([a-z])([A-Z])/g, '$1 $2'); });
+const partRaycaster = new THREE.Raycaster();
+const partMouseNdc = new THREE.Vector2();
+let partHoverLast = 0;
+renderer.domElement.addEventListener('pointermove', (ev) => {
+  if (activePresetKey === 'whole') return; // Whole Body uses the access-point tooltips above
+  if (ev.buttons) { apTooltip.style.display = 'none'; return; }
+  const now = performance.now();
+  if (now - partHoverLast < 60) return;
+  partHoverLast = now;
+  const fileByRoot = new Map();
+  Object.entries(partsByFile).forEach(([file, obj]) => { if (obj.visible) fileByRoot.set(obj, file); });
+  if (!fileByRoot.size) { apTooltip.style.display = 'none'; return; }
+  const rect = renderer.domElement.getBoundingClientRect();
+  partMouseNdc.x = ((ev.clientX - rect.left) / rect.width) * 2 - 1;
+  partMouseNdc.y = -((ev.clientY - rect.top) / rect.height) * 2 + 1;
+  partRaycaster.setFromCamera(partMouseNdc, camera);
+  const hit = partRaycaster.intersectObjects([...fileByRoot.keys()], true)[0];
+  let file = null;
+  for (let o = hit && hit.object; o && !file; o = o.parent) file = fileByRoot.get(o) || null;
+  if (!file) { apTooltip.style.display = 'none'; return; }
+  apTooltip.textContent = partLabelByFile[file] || file;
+  apTooltip.style.left = (ev.clientX - rect.left) + 'px';
+  apTooltip.style.top = (ev.clientY - rect.top) + 'px';
+  apTooltip.style.display = 'block';
+});
 
 
 document.getElementById('resetView').addEventListener('click', () => {
