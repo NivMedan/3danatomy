@@ -111,6 +111,11 @@
 
   #procedureBox { margin: var(--size-xs) var(--size-xs) 0; padding-top: var(--size-xxs); border-top: 1px solid var(--border-soft); }
   #procedureBox[hidden] { display: none; }
+  /* .section-label has a -6px bottom margin (it tucks under the preset grid
+     elsewhere), which pulled this heading into the dropdown below it. */
+  /* The box already carries the sidebar's side margin, so drop the label's own
+     24px side padding to line up with the dropdowns and rows above. */
+  #procedureBox .section-label { margin-bottom: 10px; padding-left: 0; padding-right: 0; }
   #procedureSelects { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; }
   /* Native <select> elements are kept (hidden) purely as the underlying
      value/state holder — every existing .value/.disabled/.addEventListener
